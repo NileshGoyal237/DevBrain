@@ -1,0 +1,138 @@
+"""
+backend/models/challenge.py
+AI-generated coding challenges and the user attempts against them.
+"""
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import TIMESTAMP
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
+
+from models.database import Base
+
+
+class Challenge(Base):
+    """A single coding challenge generated for (or shared by) a user."""
+
+    __tablename__ = "challenges"
+
+    # ── Primary key ──────────────────────────────────────────────────────────
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
+    )
+
+    # ── Ownership ─────────────────────────────────────────────────────────────
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # ── Challenge specification ────────────────────────────────────────────────
+    topic: Mapped[str] = mapped_column(String(100), nullable=False)
+    # "easy" | "medium" | "hard"
+    difficulty: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # ── Test cases ────────────────────────────────────────────────────────────
+    # Example:
+    # [{"input": [2, 7, 11, 15], "target": 9, "expected": [0, 1]}, ...]
+    test_cases: Mapped[list] = mapped_column(JSONB, nullable=False)
+
+    # ── Reference solution (nullable — not always revealed) ───────────────────
+    solution: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Timestamps ────────────────────────────────────────────────────────────
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    user: Mapped["User"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        "User",
+        back_populates="challenges",
+    )
+    attempts: Mapped[list["ChallengeAttempt"]] = relationship(
+        "ChallengeAttempt",
+        back_populates="challenge",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Challenge id={self.id} title={self.title!r} difficulty={self.difficulty}>"
+
+
+class ChallengeAttempt(Base):
+    """Records one user submission against a :class:`Challenge`."""
+
+    __tablename__ = "challenge_attempts"
+
+    # ── Primary key ──────────────────────────────────────────────────────────
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
+    )
+
+    # ── Foreign keys ──────────────────────────────────────────────────────────
+    challenge_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("challenges.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # ── Submission data ───────────────────────────────────────────────────────
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    passed: Mapped[bool] = mapped_column(nullable=False)
+    tests_passed: Mapped[int] = mapped_column(Integer, nullable=False)
+    tests_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Timing ────────────────────────────────────────────────────────────────
+    # Duration in seconds
+    time_taken: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # ── Timestamps ────────────────────────────────────────────────────────────
+    attempted_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+    )
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    challenge: Mapped["Challenge"] = relationship(
+        "Challenge",
+        back_populates="attempts",
+    )
+    user: Mapped["User"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        "User",
+        back_populates="challenge_attempts",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChallengeAttempt id={self.id} passed={self.passed} "
+            f"tests={self.tests_passed}/{self.tests_total}>"
+        )

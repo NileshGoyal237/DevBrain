@@ -1,0 +1,315 @@
+# Replace the stub in main.py with: from api.routes.challenges import router as challenges_router
+
+"""
+Challenge Routes
+================
+POST  /challenges/generate              — generate an adaptive challenge
+POST  /challenges/{challenge_id}/submit — submit code and get evaluation + feedback
+GET   /challenges/history               — last 20 attempts with challenge details
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import func, select
+
+from agents.challenge_agent import challenge_agent_node, evaluate_submission
+from core.dependencies import get_current_user, get_db
+from models.challenge import Challenge, ChallengeAttempt
+from models.user import User
+from services.cache_service import cache
+from services.llm_service import llm
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/challenges", tags=["challenges"])
+
+# ── Response schemas ──────────────────────────────────────────────────────
+
+
+class ChallengeResponse(BaseModel):
+    id: str
+    title: str
+    description: str
+    difficulty: str
+    topic: str
+    constraints: list[str]
+    examples: list[dict]
+    starter_code: str
+    # Note: solution is intentionally omitted from the response
+
+    class Config:
+        from_attributes = True
+
+
+class SubmitRequest(BaseModel):
+    code: str
+
+
+class AttemptResult(BaseModel):
+    attempt_id: str
+    challenge_id: str
+    tests_passed: int
+    tests_total: int
+    passed: bool
+    output: str
+    error: Optional[str]
+    feedback: str  # Grok explanation
+    suggest_more_practice: bool = False
+    topic: Optional[str] = None
+
+
+class AttemptHistoryItem(BaseModel):
+    attempt_id: str
+    challenge_id: str
+    challenge_title: str
+    challenge_topic: str
+    difficulty: str
+    passed: bool
+    tests_passed: int
+    tests_total: int
+    submitted_at: datetime
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# POST /challenges/generate                                                  #
+# ══════════════════════════════════════════════════════════════════════════ #
+
+
+@router.post(
+    "/generate",
+    response_model=ChallengeResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate an adaptive coding challenge targeting the user's weakest skill",
+)
+async def generate_challenge(
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Runs the challenge agent to produce a tailored problem based on the user's
+    skill profile stored in Redis/PostgreSQL.
+    """
+    user_id = str(current_user.id)
+
+    skill_profile: dict = {}
+    cached = await cache.get_skill_profile(user_id)
+    if cached:
+        skill_profile = {"skills": cached.get("skills", {})}
+
+    state = {
+        "user_id": user_id,
+        "github_username": current_user.github_username or "",
+        "intent": "challenge",
+        "current_agent": "challenge_agent",
+        "user_input": "",
+        "agent_output": "",
+        "structured_output": {},
+        "skill_profile": skill_profile,
+        "conversation_history": [],
+        "rag_context": [],
+        "reflection_score": 0.0,
+        "iteration_count": 0,
+        "max_iterations": 3,
+        "error": None,
+        "should_continue": True,
+    }
+
+    final_state = await challenge_agent_node(state)
+
+    if final_state.get("error"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Challenge generation failed: {final_state['error']}",
+        )
+
+    structured = final_state.get("structured_output", {})
+    challenge_id = structured.get("id")
+    if not challenge_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Challenge was generated but could not be retrieved.",
+        )
+
+    result = await db.execute(
+        select(Challenge).where(Challenge.id == uuid.UUID(challenge_id))
+    )
+    challenge: Optional[Challenge] = result.scalar_one_or_none()
+
+    if not challenge:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Challenge not found after creation.")
+
+    return ChallengeResponse(
+        id=str(challenge.id),
+        title=challenge.title,
+        description=challenge.description,
+        difficulty=challenge.difficulty,
+        topic=challenge.topic,
+        constraints=challenge.constraints or [],
+        examples=challenge.examples or [],
+        starter_code=challenge.starter_code,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# POST /challenges/{challenge_id}/submit                                     #
+# ══════════════════════════════════════════════════════════════════════════ #
+
+
+@router.post(
+    "/{challenge_id}/submit",
+    response_model=AttemptResult,
+    status_code=status.HTTP_200_OK,
+    summary="Submit code for a challenge and receive evaluation + AI feedback",
+)
+async def submit_challenge(
+    challenge_id: str,
+    body: SubmitRequest,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Evaluates `code` against the challenge's test cases in a sandboxed
+    subprocess (5 s timeout per test).  Records a `ChallengeAttempt`.
+
+    If the user has failed the **same topic 3+ times**, the response includes:
+    `{"suggest_more_practice": true, "topic": "..."}`.
+
+    Also returns `feedback` — a Grok explanation of the solution and tips.
+    """
+    try:
+        cid = uuid.UUID(challenge_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="challenge_id must be a valid UUID.",
+        )
+
+    # Fetch challenge
+    result = await db.execute(select(Challenge).where(Challenge.id == cid))
+    challenge: Optional[Challenge] = result.scalar_one_or_none()
+    if not challenge:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Challenge not found.")
+
+    # ── Run sandboxed evaluation ──────────────────────────────────────────
+    eval_result = await evaluate_submission(challenge, body.code)
+
+    # ── Save attempt ──────────────────────────────────────────────────────
+    attempt = ChallengeAttempt(
+        id=uuid.uuid4(),
+        user_id=current_user.id,
+        challenge_id=cid,
+        submitted_code=body.code,
+        tests_passed=eval_result["tests_passed"],
+        tests_total=eval_result["tests_total"],
+        passed=eval_result["passed"],
+        output=eval_result["output"],
+        error=eval_result.get("error"),
+        submitted_at=datetime.utcnow(),
+    )
+    db.add(attempt)
+    await db.commit()
+    await db.refresh(attempt)
+
+    # ── Check if user needs more practice on this topic ───────────────────
+    suggest_more_practice = False
+    if not eval_result["passed"]:
+        # Count failures on the same topic
+        fail_count_result = await db.execute(
+            select(func.count(ChallengeAttempt.id))
+            .join(Challenge, ChallengeAttempt.challenge_id == Challenge.id)
+            .where(
+                ChallengeAttempt.user_id == current_user.id,
+                Challenge.topic == challenge.topic,
+                ChallengeAttempt.passed == False,  # noqa: E712
+            )
+        )
+        fail_count: int = fail_count_result.scalar_one() or 0
+        if fail_count >= 3:
+            suggest_more_practice = True
+
+    # ── Ask Grok for solution explanation and tips ────────────────────────
+    feedback_prompt = (
+        f"A developer submitted code for a '{challenge.difficulty}' challenge titled "
+        f"'{challenge.title}' (topic: {challenge.topic}).\n\n"
+        f"Their code:\n```python\n{body.code}\n```\n\n"
+        f"Test result: {eval_result['tests_passed']}/{eval_result['tests_total']} tests passed.\n\n"
+        f"Reference solution:\n```python\n{challenge.solution or 'N/A'}\n```\n\n"
+        f"Write exactly 3 paragraphs:\n"
+        f"1. Explain what the correct approach is and why.\n"
+        f"2. Point out what the developer did right and where they went wrong.\n"
+        f"3. Give 2 concrete tips to improve their code quality for this topic.\n"
+        f"Be specific, educational, and encouraging."
+    )
+    try:
+        feedback: str = await llm.complete(feedback_prompt)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Grok feedback generation failed: %s", exc)
+        feedback = "Feedback unavailable right now. Review the reference solution above."
+
+    return AttemptResult(
+        attempt_id=str(attempt.id),
+        challenge_id=challenge_id,
+        tests_passed=eval_result["tests_passed"],
+        tests_total=eval_result["tests_total"],
+        passed=eval_result["passed"],
+        output=eval_result["output"],
+        error=eval_result.get("error"),
+        feedback=feedback,
+        suggest_more_practice=suggest_more_practice,
+        topic=challenge.topic if suggest_more_practice else None,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# GET /challenges/history                                                    #
+# ══════════════════════════════════════════════════════════════════════════ #
+
+
+@router.get(
+    "/history",
+    response_model=list[AttemptHistoryItem],
+    status_code=status.HTTP_200_OK,
+    summary="Return the last 20 challenge attempts with challenge details",
+)
+async def challenge_history(
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Returns the 20 most recent `ChallengeAttempt` records for the current user,
+    joined with the parent `Challenge` for title, topic, and difficulty.
+    """
+    rows = await db.execute(
+        select(ChallengeAttempt, Challenge)
+        .join(Challenge, ChallengeAttempt.challenge_id == Challenge.id)
+        .where(ChallengeAttempt.user_id == current_user.id)
+        .order_by(ChallengeAttempt.submitted_at.desc())
+        .limit(20)
+    )
+
+    items: list[AttemptHistoryItem] = []
+    for attempt, challenge in rows.all():
+        items.append(
+            AttemptHistoryItem(
+                attempt_id=str(attempt.id),
+                challenge_id=str(attempt.challenge_id),
+                challenge_title=challenge.title,
+                challenge_topic=challenge.topic,
+                difficulty=challenge.difficulty,
+                passed=attempt.passed,
+                tests_passed=attempt.tests_passed,
+                tests_total=attempt.tests_total,
+                submitted_at=attempt.submitted_at,
+            )
+        )
+
+    return items

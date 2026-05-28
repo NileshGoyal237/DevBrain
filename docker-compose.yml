@@ -1,0 +1,88 @@
+version: "3.9"
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+
+services:
+
+  # ── PostgreSQL 16 ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: devbrain_db
+      POSTGRES_USER: devbrain_user
+      POSTGRES_PASSWORD: devbrain_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devbrain_user -d devbrain_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - devbrain_net
+
+
+  # ── Redis 7 ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - devbrain_net
+
+
+  # ── FastAPI backend ───────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Run migrations then start the API server
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      # Persist ChromaDB vector store across container restarts
+      - ./data/chroma:/app/data/chroma
+      # Hot-reload: mount source code during development
+      - ./backend:/app
+    networks:
+      - devbrain_net
+
+
+  # ── Next.js frontend ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - devbrain_net
+
+
+# ── Internal network ──────────────────────────────────────────────────────────
+networks:
+  devbrain_net:
+    driver: bridge
