@@ -3,6 +3,8 @@ backend/models/user.py
 SQLAlchemy ORM model for authenticated GitHub users.
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
 
@@ -103,6 +105,13 @@ class User(Base):
     __table_args__ = (
         Index("ix_users_github_username", "github_username"),
     )
+
+    @property
+    def skill_profile(self) -> "SkillProfile" | None:
+        """Helper property to retrieve the most recent skill profile."""
+        if not self.skill_profiles:
+            return None
+        return sorted(self.skill_profiles, key=lambda p: p.analyzed_at or datetime.min, reverse=True)[0]
 
     def __repr__(self) -> str:
         return f"<User id={self.id} github={self.github_username}>"

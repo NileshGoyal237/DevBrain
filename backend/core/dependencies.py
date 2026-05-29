@@ -77,8 +77,12 @@ async def get_current_user(
     except (ValueError, TypeError):
         raise credentials_exc
 
+    from sqlalchemy.orm import selectinload
+
     result = await db.execute(
-        select(User).where(User.github_id == github_id)
+        select(User)
+        .options(selectinload(User.skill_profiles))
+        .where(User.github_id == github_id)
     )
     user = result.scalar_one_or_none()
 

@@ -37,6 +37,7 @@ def _make_state(**kwargs) -> DevBrainState:
     """Build a minimal DevBrainState with sensible defaults."""
     defaults: dict[str, Any] = {
         "user_id": str(uuid.uuid4()),
+        "github_username": "testdev",
         "user_input": "",
         "route_intent": None,
         "structured_output": None,
@@ -58,29 +59,25 @@ def _make_state(**kwargs) -> DevBrainState:
 class TestRouteIntent:
     """route_intent should classify user messages into well-known intents."""
 
-    @pytest.mark.asyncio
-    async def test_route_review_intent(self):
+    def test_route_review_intent(self):
         state = _make_state(user_input="can you review my code")
-        result = await route_intent(state)
-        assert result["route_intent"] == "review"
+        result = route_intent(state)
+        assert result == "review"
 
-    @pytest.mark.asyncio
-    async def test_route_challenge_intent(self):
+    def test_route_challenge_intent(self):
         state = _make_state(user_input="give me a practice problem")
-        result = await route_intent(state)
-        assert result["route_intent"] == "challenge"
+        result = route_intent(state)
+        assert result == "challenge"
 
-    @pytest.mark.asyncio
-    async def test_route_resources_intent(self):
+    def test_route_resources_intent(self):
         state = _make_state(user_input="where can I learn about trees")
-        result = await route_intent(state)
-        assert result["route_intent"] == "resources"
+        result = route_intent(state)
+        assert result == "resources"
 
-    @pytest.mark.asyncio
-    async def test_route_progress_intent(self):
+    def test_route_progress_intent(self):
         state = _make_state(user_input="show me my progress")
-        result = await route_intent(state)
-        assert result["route_intent"] == "progress"
+        result = route_intent(state)
+        assert result == "progress"
 
 
 # ===========================================================================
@@ -127,8 +124,8 @@ class TestCodeReviewAgent:
         """Score below threshold + iterations remaining → 'review_again'."""
         state = _make_state(
             reflection_score=0.5,
-            reflection_iteration=0,
-            max_reflections=2,
+            iteration_count=0,
+            max_iterations=2,
         )
         decision = should_reflect_again(state)
         assert decision == "review_again"
@@ -137,8 +134,8 @@ class TestCodeReviewAgent:
         """Score below threshold but max iterations reached → 'done'."""
         state = _make_state(
             reflection_score=0.5,
-            reflection_iteration=2,
-            max_reflections=2,
+            iteration_count=2,
+            max_iterations=2,
         )
         decision = should_reflect_again(state)
         assert decision == "done"
@@ -147,8 +144,8 @@ class TestCodeReviewAgent:
         """Score above threshold → 'done' regardless of iteration count."""
         state = _make_state(
             reflection_score=0.9,
-            reflection_iteration=0,
-            max_reflections=2,
+            iteration_count=0,
+            max_iterations=2,
         )
         decision = should_reflect_again(state)
         assert decision == "done"
@@ -180,23 +177,27 @@ class TestGithubAnalyzerNode:
         mock_github.get_user_repos.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @patch("agents.github_analyzer.llm")
     @patch("agents.github_analyzer.github_service")
     @patch("agents.github_analyzer.cache")
-    async def test_github_analyzer_saves_to_cache(self, mock_cache, mock_github):
+    async def test_github_analyzer_saves_to_cache(
+        self, mock_cache, mock_github, mock_llm
+    ):
         """On cache miss, github_service is called and result is written to cache."""
         mock_cache.get_skill_profile = AsyncMock(return_value=None)
         mock_cache.set_skill_profile = AsyncMock(return_value=True)
-        mock_github.get_user_repos = AsyncMock(
-            return_value=[{"name": "repo1", "language": "Python"}]
+        mock_github.analyze_skill_profile = AsyncMock(
+            return_value={
+                "skills": {"Python": 0.75, "Shell": 0.20},
+                "repo_count": 1,
+            }
         )
-        mock_github.analyze_skills = AsyncMock(
-            return_value={"Python": 0.75, "Shell": 0.20}
-        )
+        mock_llm.call = AsyncMock(return_value="encouraging feedback summary")
 
         state = _make_state(user_id="user-xyz")
         await github_analyzer_node(state)
 
-        mock_github.get_user_repos.assert_awaited_once()
+        mock_github.analyze_skill_profile.assert_awaited_once()
         mock_cache.set_skill_profile.assert_awaited_once()
 
 
@@ -243,6 +244,7 @@ class TestChallengeAgent:
         """
         mock_llm.structured_call = AsyncMock(
             return_value={
+                "title": "Python Square Challenge",
                 "topic": "Python list comprehensions",
                 "difficulty": "easy",
                 "problem_statement": "Write a list comprehension to square numbers.",
@@ -306,30 +308,40 @@ HIGH_CONFIDENCE_RESULTS = [
 class TestResourceAgent:
 
     @pytest.mark.asyncio
-    @patch("agents.resource_agent.tavily_search")
     @patch("agents.resource_agent.vector_store")
+    @patch("agents.resource_agent.search_service")
     async def test_resource_agent_uses_chromadb_first(
-        self, mock_vs, mock_tavily
+        self, mock_search, mock_vs
     ):
         """High-confidence ChromaDB results should prevent a Tavily call."""
-        mock_vs.search = AsyncMock(return_value=HIGH_CONFIDENCE_RESULTS)
-        mock_tavily.search = AsyncMock(return_value=[])
+        mock_vs.search_resources = AsyncMock(return_value=[
+            {
+                "title": f"Trees {i}",
+                "url": f"https://example.com/trees{i}",
+                "snippet": f"Trees snippet {i}",
+                "distance": 0.1,  # less than 0.3 means high confidence
+                "source": "chromadb",
+            }
+            for i in range(3)
+        ])
+        mock_search.search_resources = AsyncMock(return_value=[])
 
         state = _make_state(user_input="learn about binary trees")
         await resource_agent_node(state)
 
-        mock_vs.search.assert_awaited_once()
-        mock_tavily.search.assert_not_awaited()
+        mock_vs.search_resources.assert_awaited_once()
+        mock_search.search_resources.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("agents.resource_agent.tavily_search")
     @patch("agents.resource_agent.vector_store")
+    @patch("agents.resource_agent.search_service")
     async def test_resource_agent_falls_back_to_tavily(
-        self, mock_vs, mock_tavily
+        self, mock_search, mock_vs
     ):
         """Empty ChromaDB results should trigger a Tavily web search."""
-        mock_vs.search = AsyncMock(return_value=[])
-        mock_tavily.search = AsyncMock(
+        mock_vs.search_resources = AsyncMock(return_value=[])
+        mock_vs.add_resource = AsyncMock()
+        mock_search.search_resources = AsyncMock(
             return_value=[
                 {
                     "title": "Binary Search Tree - Wikipedia",
@@ -344,5 +356,5 @@ class TestResourceAgent:
         state = _make_state(user_input="learn about binary trees")
         await resource_agent_node(state)
 
-        mock_vs.search.assert_awaited_once()
-        mock_tavily.search.assert_awaited_once()
+        mock_vs.search_resources.assert_awaited_once()
+        mock_search.search_resources.assert_awaited_once()

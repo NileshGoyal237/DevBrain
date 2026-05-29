@@ -14,7 +14,6 @@ import logging
 from typing import Optional
 
 from langgraph.graph import END, StateGraph
-from langgraph.checkpoint.memory import MemorySaver
 from typing_extensions import TypedDict
 
 logger = logging.getLogger(__name__)
@@ -144,6 +143,8 @@ from agents.challenge_agent import challenge_agent_node  # noqa: E402
 from agents.progress_agent import progress_agent_node  # noqa: E402
 from agents.code_review_agent import code_review_node as code_reviewer_node  # noqa: E402
 from agents.code_review_agent import reflection_node as reflector_node  # noqa: E402
+from agents.code_review_agent import should_reflect_again  # noqa: E402
+
 from agents.interview_agent import interview_agent_node  # noqa: E402
 from agents.resource_agent import resource_agent_node  # noqa: E402
 
@@ -188,21 +189,29 @@ _builder.add_conditional_edges(
     },
 )
 
-# All agent nodes terminate at END
+# All agent nodes terminate at END (except code_reviewer and reflector which form a loop)
 for _node in [
     "github_analyzer",
     "roadmap_agent",
     "challenge_agent",
     "progress_agent",
-    "code_reviewer",
-    "reflector",
     "interview_agent",
     "resource_agent",
     "chat_stub",
 ]:
     _builder.add_edge(_node, END)
 
+# Code reviewer goes to reflector node
+_builder.add_edge("code_reviewer", "reflector")
+
+# Reflector conditional router
+_builder.add_conditional_edges(
+    "reflector",
+    should_reflect_again,
+    {"review_again": "code_reviewer", "done": END}
+)
+
 # ── Compile ────────────────────────────────────────────────────────────────
-app = _builder.compile(checkpointer=MemorySaver())
+app = _builder.compile()
 
 __all__ = ["app", "DevBrainState", "route_intent"]

@@ -63,8 +63,9 @@ async def roadmap_agent_node(state: dict) -> dict:
             if cached:
                 skills = cached.get("skills", {})
 
+        structured_out = state.get("structured_output") or {}
         target_role: str = (
-            state.get("structured_output", {}).get("target_role")
+            structured_out.get("target_role")
             or "SDE Intern"
         )
         role_hint: str = _ROLE_HINTS.get(target_role, _ROLE_HINTS["SDE Intern"])
@@ -185,10 +186,14 @@ Return ONLY valid JSON (no markdown fences, no extra text) in this exact schema:
 # ─────────────────────────────────────────────────────────────────────────── #
 
 
-def _parse_json_safe(text: str) -> Optional[dict]:
+def _parse_json_safe(text) -> Optional[dict]:
     """
     Attempt JSON parsing; also handles responses wrapped in markdown fences.
     """
+    if isinstance(text, dict):
+        return text
+    if not isinstance(text, str):
+        return None
     text = text.strip()
     # Strip possible ```json ... ``` wrapper
     fenced = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)

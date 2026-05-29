@@ -72,6 +72,15 @@ class ProgressSnapshot(Base):
         back_populates="progress_snapshots",
     )
 
+    @property
+    def skills(self) -> dict:
+        """Proxy to skills_snapshot."""
+        return self.skills_snapshot
+
+    @skills.setter
+    def skills(self, value: dict) -> None:
+        self.skills_snapshot = value
+
     def __repr__(self) -> str:
         return (
             f"<ProgressSnapshot user_id={self.user_id} "

@@ -6,6 +6,7 @@ Three collections:
   • session_history    — per-user conversational memory
 """
 
+import asyncio
 import logging
 
 import chromadb
@@ -49,7 +50,7 @@ class VectorStoreService:
     # Code Review Collection
     # ------------------------------------------------------------------
 
-    def add_code_review(
+    async def add_code_review(
         self,
         review_id: str,
         code: str,
@@ -59,19 +60,21 @@ class VectorStoreService:
     ) -> None:
         """Store a code review for future similarity search."""
         document = f"{language} code: {code[:500]}\nReview: {review_summary}"
-        self.code_collection.add(
-            ids=[review_id],
-            documents=[document],
-            metadatas=[
-                {
-                    "review_id": review_id,
-                    "user_id": user_id,
-                    "language": language,
-                }
-            ],
-        )
+        def _add():
+            self.code_collection.add(
+                ids=[review_id],
+                documents=[document],
+                metadatas=[
+                    {
+                        "review_id": review_id,
+                        "user_id": user_id,
+                        "language": language,
+                    }
+                ],
+            )
+        await asyncio.to_thread(_add)
 
-    def search_similar_reviews(
+    async def search_similar_reviews(
         self,
         code: str,
         language: str,
@@ -82,17 +85,19 @@ class VectorStoreService:
         Each item: {"document": str, "metadata": dict, "distance": float}
         """
         query = f"{language} code: {code[:500]}"
-        results = self.code_collection.query(
-            query_texts=[query],
-            n_results=n_results,
-        )
-        return self._zip_results(results)
+        def _query():
+            results = self.code_collection.query(
+                query_texts=[query],
+                n_results=n_results,
+            )
+            return self._zip_results(results)
+        return await asyncio.to_thread(_query)
 
     # ------------------------------------------------------------------
     # Learning Resources Collection
     # ------------------------------------------------------------------
 
-    def add_resource(
+    async def add_resource(
         self,
         resource_id: str,
         title: str,
@@ -104,21 +109,23 @@ class VectorStoreService:
     ) -> None:
         """Index a learning resource."""
         document = f"{title}: {description}"
-        self.resource_collection.add(
-            ids=[resource_id],
-            documents=[document],
-            metadatas=[
-                {
-                    "title": title,
-                    "topic": topic,
-                    "difficulty": difficulty,
-                    "url": url,
-                    "source": source,
-                }
-            ],
-        )
+        def _add():
+            self.resource_collection.add(
+                ids=[resource_id],
+                documents=[document],
+                metadatas=[
+                    {
+                        "title": title,
+                        "topic": topic,
+                        "difficulty": difficulty,
+                        "url": url,
+                        "source": source,
+                    }
+                ],
+            )
+        await asyncio.to_thread(_add)
 
-    def search_resources(
+    async def search_resources(
         self,
         query: str,
         topic: str = "",
@@ -134,26 +141,38 @@ class VectorStoreService:
         if where:
             kwargs["where"] = where
 
-        results = self.resource_collection.query(**kwargs)
-        rows = self._zip_results(results)
+        def _query():
+            results = self.resource_collection.query(**kwargs)
+            rows = self._zip_results(results)
+            return [
+                {
+                    "title": r["metadata"].get("title", ""),
+                    "url": r["metadata"].get("url", ""),
+                    "topic": r["metadata"].get("topic", ""),
+                    "difficulty": r["metadata"].get("difficulty", ""),
+                    "distance": r["distance"],
+                }
+                for r in rows
+            ]
+        return await asyncio.to_thread(_query)
 
-        # Reshape to the documented schema
-        return [
-            {
-                "title": r["metadata"].get("title", ""),
-                "url": r["metadata"].get("url", ""),
-                "topic": r["metadata"].get("topic", ""),
-                "difficulty": r["metadata"].get("difficulty", ""),
-                "distance": r["distance"],
-            }
-            for r in rows
-        ]
+    async def list_resource_topics(self) -> list[str]:
+        """Retrieve unique topics indexed in the resource collection."""
+        def _get():
+            results = self.resource_collection.get(include=["metadatas"])
+            metadatas = results.get("metadatas") or []
+            topics = set()
+            for meta in metadatas:
+                if meta and "topic" in meta:
+                    topics.add(meta["topic"])
+            return list(topics)
+        return await asyncio.to_thread(_get)
 
     # ------------------------------------------------------------------
     # Session Memory Collection
     # ------------------------------------------------------------------
 
-    def add_session_memory(
+    async def add_session_memory(
         self,
         session_id: str,
         user_id: str,
@@ -161,18 +180,20 @@ class VectorStoreService:
         session_type: str,
     ) -> None:
         """Persist a session turn for long-term user context."""
-        self.session_collection.add(
-            ids=[session_id],
-            documents=[content],
-            metadatas=[
-                {
-                    "user_id": user_id,
-                    "session_type": session_type,
-                }
-            ],
-        )
+        def _add():
+            self.session_collection.add(
+                ids=[session_id],
+                documents=[content],
+                metadatas=[
+                    {
+                        "user_id": user_id,
+                        "session_type": session_type,
+                    }
+                ],
+            )
+        await asyncio.to_thread(_add)
 
-    def get_user_context(
+    async def get_user_context(
         self,
         user_id: str,
         query: str,
@@ -182,13 +203,15 @@ class VectorStoreService:
         Retrieve the most relevant session snippets for a user.
         Returns a list of plain document strings.
         """
-        results = self.session_collection.query(
-            query_texts=[query],
-            n_results=n_results,
-            where={"user_id": user_id},
-        )
-        rows = self._zip_results(results)
-        return [r["document"] for r in rows]
+        def _query():
+            results = self.session_collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                where={"user_id": user_id},
+            )
+            rows = self._zip_results(results)
+            return [r["document"] for r in rows]
+        return await asyncio.to_thread(_query)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -214,6 +237,7 @@ class VectorStoreService:
                 }
             )
         return output
+
 
 
 # ---------------------------------------------------------------------------

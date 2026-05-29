@@ -17,6 +17,12 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.dialects.postgresql import JSONB
+
+@compiles(JSONB, "sqlite")
+def compile_jsonb_sqlite(element, compiler, **kw):
+    return "JSON"
 
 # ---------------------------------------------------------------------------
 # Patch settings BEFORE importing any app code so modules pick up test values
@@ -32,9 +38,9 @@ _settings_patch = patch.dict(
         "GITHUB_CLIENT_ID": "test-gh-client",
         "GITHUB_CLIENT_SECRET": "test-gh-secret",
         "GITHUB_REDIRECT_URI": "http://localhost:8000/auth/callback",
-        "SECRET_KEY": "super-secret-test-key-32-chars!!",
-        "ALGORITHM": "HS256",
-        "ACCESS_TOKEN_EXPIRE_MINUTES": "60",
+        "JWT_SECRET_KEY": "super-secret-test-key-32-chars!!",
+        "JWT_ALGORITHM": "HS256",
+        "JWT_EXPIRE_MINUTES": "60",
         "CHROMA_PERSIST_DIR": "/tmp/test_chroma",
         "TAVILY_API_KEY": "test-tavily-key",
         "ENVIRONMENT": "test",
@@ -48,6 +54,11 @@ from core.security import create_access_token  # noqa: E402
 from models.database import Base  # noqa: E402
 from models.user import User  # noqa: E402
 from models.skill_profile import SkillProfile  # noqa: E402
+from models.roadmap import Roadmap  # noqa: E402
+from models.challenge import Challenge, ChallengeAttempt  # noqa: E402
+from models.code_review import CodeReview  # noqa: E402
+from models.interview import InterviewSession  # noqa: E402
+from models.progress import ProgressSnapshot  # noqa: E402
 from main import app  # noqa: E402
 from core.dependencies import get_db  # noqa: E402
 
@@ -64,20 +75,14 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", autouse=True)
 async def test_engine():
     """Create SQLite in-memory engine and all tables once per session."""
-    engine = create_async_engine(
-        TEST_DB_URL,
-        connect_args={"check_same_thread": False},
-        echo=False,
-    )
+    from models.database import engine as db_engine
+    engine = db_engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
 
 
 @pytest.fixture(scope="session")
@@ -100,8 +105,14 @@ def test_session_factory(test_engine):
 async def db_session(test_session_factory) -> AsyncGenerator[AsyncSession, None]:
     """
     Yield an async session that is rolled back after every test.
-    Uses SAVEPOINT so we can nest begin/rollback without losing the outer tx.
+    Deletes all rows from all tables before each test to guarantee absolute isolation.
     """
+    async with test_session_factory() as session:
+        # Delete all existing data from all tables to ensure clean state
+        for table in reversed(Base.metadata.sorted_tables):
+            await session.execute(table.delete())
+        await session.commit()
+
     async with test_session_factory() as session:
         async with session.begin():
             yield session
@@ -118,12 +129,9 @@ async def mock_user(db_session: AsyncSession) -> User:
     user = User(
         id=uuid.uuid4(),
         github_id=12345,
-        username="testdev",
-        email="testdev@example.com",
+        github_username="testdev",
         avatar_url="https://avatars.githubusercontent.com/u/12345",
-        github_access_token="ghp_test_token_xyz",
         created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
     )
     db_session.add(user)
     await db_session.flush()
@@ -144,25 +152,19 @@ async def mock_skill_profile(db_session: AsyncSession, mock_user: User) -> Skill
             "Docker": 0.30,
             "Rust": 0.10,
         },
-        primary_languages=["Python", "JavaScript"],
-        frameworks=["FastAPI", "React", "Next.js"],
-        experience_level="intermediate",
-        last_analyzed_at=datetime.utcnow(),
         repo_count=12,
-        total_commits=438,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        analyzed_at=datetime.utcnow(),
     )
     db_session.add(profile)
     await db_session.flush()
     return profile
 
 
-@pytest_asyncio.fixture
+@pytest.fixture
 def auth_headers(mock_user: User) -> dict[str, str]:
     """Return Authorization headers with a valid JWT for mock_user."""
     token = create_access_token(
-        data={"sub": str(mock_user.id), "username": mock_user.username},
+        data={"sub": str(mock_user.github_id), "username": mock_user.github_username},
         expires_delta=timedelta(minutes=60),
     )
     return {"Authorization": f"Bearer {token}"}

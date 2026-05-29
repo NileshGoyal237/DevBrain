@@ -250,7 +250,7 @@ async def submit_challenge(
         f"Be specific, educational, and encouraging."
     )
     try:
-        feedback: str = await llm.complete(feedback_prompt)
+        feedback: str = await llm.call(feedback_prompt)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Grok feedback generation failed: %s", exc)
         feedback = "Feedback unavailable right now. Review the reference solution above."

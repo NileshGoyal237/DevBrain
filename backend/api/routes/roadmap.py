@@ -29,8 +29,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["roadmap"])
 
-# Allowed target roles
-_ALLOWED_ROLES: set[str] = {"SDE Intern", "Backend", "ML", "Full-Stack", "DevOps"}
+# Allowed target roles (must match frontend dropdown values)
+_ALLOWED_ROLES: set[str] = {
+    "SDE Intern",
+    "Frontend Engineer",
+    "Backend Engineer",
+    "Full Stack Engineer",
+    "DevOps / Platform Engineer",
+    "ML / AI Engineer",
+    "Data Engineer",
+    "Mobile Engineer",
+    "Security Engineer",
+    # Keep short aliases for backward compatibility
+    "Backend",
+    "ML",
+    "Full-Stack",
+    "DevOps",
+    "Frontend",
+}
 
 # ── Request / Response schemas ────────────────────────────────────────────
 

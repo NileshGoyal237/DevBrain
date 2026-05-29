@@ -121,7 +121,7 @@ async def progress_agent_node(state: dict) -> dict:
             streak=streak,
             exam_readiness=exam_readiness,
         )
-        weekly_digest: str = await llm.complete(digest_prompt)
+        weekly_digest: str = await llm.call(digest_prompt)
 
         # ── 6. Build output ────────────────────────────────────────────────
         structured: dict = {

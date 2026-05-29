@@ -107,8 +107,12 @@ export default function DashboardPage() {
     setAnalyzing(true);
     setError("");
     try {
-      await analyzeGithub(githubToken || undefined);
-      const p = await getSkillProfile();
+      const token = githubToken.trim();
+      const useToken =
+        token.startsWith("ghp_") || token.startsWith("github_pat_");
+      const p = await analyzeGithub(
+        useToken ? { github_token: token } : undefined,
+      );
       setProfile(p);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Analysis failed");

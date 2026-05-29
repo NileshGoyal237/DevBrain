@@ -15,7 +15,7 @@ import re
 import textwrap
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 from models.database import async_session
 from models.challenge import Challenge
@@ -104,7 +104,8 @@ async def challenge_agent_node(state: dict) -> dict:
         challenge_dict: Optional[dict] = _parse_json_safe(raw)
 
         if not challenge_dict or "title" not in challenge_dict:
-            raise ValueError(f"LLM returned unparseable challenge JSON:\n{raw[:300]}")
+            raw_str = json.dumps(raw) if isinstance(raw, dict) else str(raw)
+            raise ValueError(f"LLM returned unparseable challenge JSON:\n{raw_str[:300]}")
 
         # Enforce required fields
         challenge_dict.setdefault("difficulty", difficulty)
@@ -156,12 +157,17 @@ async def challenge_agent_node(state: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════ #
 
 
-async def evaluate_submission(challenge: Challenge, user_code: str) -> dict:
+async def evaluate_submission(
+    challenge_or_code: Any = None,
+    user_code: Optional[str] = None,
+    test_cases: Optional[list[dict]] = None,
+    timeout_seconds: float = 5.0,
+) -> dict:
     """
     Execute user_code in a sandboxed subprocess and run every test case.
 
     Each test case is injected as a harness appended to the user's code.
-    A wall-clock timeout of 5 seconds is enforced per test.
+    A wall-clock timeout is enforced per test.
 
     Returns
     -------
@@ -173,8 +179,19 @@ async def evaluate_submission(challenge: Challenge, user_code: str) -> dict:
         "error": str | None,
     }
     """
-    test_cases: list[dict] = challenge.test_cases or []
-    if not test_cases:
+    import sys
+
+    if isinstance(challenge_or_code, str):
+        actual_code = challenge_or_code
+        actual_test_cases = test_cases or []
+    elif challenge_or_code is None:
+        actual_code = user_code or ""
+        actual_test_cases = test_cases or []
+    else:
+        actual_code = user_code or ""
+        actual_test_cases = challenge_or_code.test_cases or []
+
+    if not actual_test_cases:
         return {
             "tests_passed": 0,
             "tests_total": 0,
@@ -187,7 +204,7 @@ async def evaluate_submission(challenge: Challenge, user_code: str) -> dict:
     all_output_lines: list[str] = []
     first_error: Optional[str] = None
 
-    for idx, tc in enumerate(test_cases, start=1):
+    for idx, tc in enumerate(actual_test_cases, start=1):
         tc_input: str = tc.get("input", "")
         expected: str = tc.get("expected", "").strip()
 
@@ -199,7 +216,19 @@ async def evaluate_submission(challenge: Challenge, user_code: str) -> dict:
             _captured = io.StringIO()
             sys.stdout = _captured
             try:
-                _result = solution({tc_input!r})
+                # Support solutions named 'solution' or functions defined in user_code
+                # We execute tc_input directly if it's a full expression, or pass it to solution()
+                try:
+                    # try calling solution() first if defined
+                    if 'def solution' in {actual_code!r} or 'solution' in globals() or 'solution' in locals():
+                        _result = solution({tc_input!r})
+                    else:
+                        # Fallback: exec user_code and evaluate the input expression directly
+                        _result = eval({tc_input!r})
+                except NameError:
+                    # fallback to direct eval
+                    _result = eval({tc_input!r})
+
                 if _result is not None:
                     print(_result)
             except Exception as _exc:
@@ -211,11 +240,11 @@ async def evaluate_submission(challenge: Challenge, user_code: str) -> dict:
             print(_actual)
         """)
 
-        full_script = user_code + "\n" + harness
+        full_script = actual_code + "\n" + harness
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python3",
+                sys.executable,
                 "-c",
                 full_script,
                 stdout=asyncio.subprocess.PIPE,
@@ -223,12 +252,12 @@ async def evaluate_submission(challenge: Challenge, user_code: str) -> dict:
             )
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=5.0
+                    proc.communicate(), timeout=timeout_seconds
                 )
             except asyncio.TimeoutError:
                 proc.kill()
                 all_output_lines.append(f"Test {idx}: ❌ TIMEOUT (> 5 s)")
-                first_error = first_error or "Time limit exceeded."
+                first_error = first_error or "Time limit exceeded (timeout)."
                 continue
 
             stdout_str = stdout_b.decode(errors="replace").strip()
@@ -344,7 +373,11 @@ def _format_challenge_display(c: dict) -> str:
     return "\n".join(lines)
 
 
-def _parse_json_safe(text: str) -> Optional[dict]:
+def _parse_json_safe(text) -> Optional[dict]:
+    if isinstance(text, dict):
+        return text
+    if not isinstance(text, str):
+        return None
     text = text.strip()
     fenced = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
     if fenced:

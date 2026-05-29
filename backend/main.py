@@ -3,15 +3,18 @@ backend/main.py
 DevBrain API — FastAPI application entry point.
 """
 
+import logging
 import os
+import traceback
 
 # Must be set before chromadb is imported (suppresses broken posthog telemetry on Windows)
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from api.routes.auth import router as auth_router
 from api.routes.github import router as github_router
@@ -55,11 +58,32 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("devbrain")
+
+# ── Global exception handler ─────────────────────────────────────────────────
+# FastAPI's CORSMiddleware does NOT add CORS headers when an unhandled
+# exception causes a 500.  This handler catches everything, logs the full
+# traceback to the console, and returns a proper JSON error WITH CORS headers
+# so the browser console shows the real message instead of a misleading
+# "CORS policy" error.
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url, "".join(tb))
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+    )
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────

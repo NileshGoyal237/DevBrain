@@ -62,6 +62,7 @@ class SendMessageResponse(BaseModel):
     response: str
     evaluation: EvaluationSchema | None = None
     session_complete: bool
+    report: dict | None = None
 
 
 class SessionReportResponse(BaseModel):
@@ -331,6 +332,7 @@ async def send_message(
         response=agent_response,
         evaluation=evaluation_schema,
         session_complete=session_complete,
+        report=final_report,
     )
 
 

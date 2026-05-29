@@ -1,5 +1,5 @@
 """
-LLM Service — wraps xAI Grok API (OpenAI-compatible).
+LLM Service — wraps Groq API (OpenAI-compatible).
 Provides standard call, structured JSON call, and streaming.
 """
 
@@ -23,7 +23,7 @@ class LLMService:
     def __init__(self) -> None:
         self.client = AsyncOpenAI(
             api_key=settings.XAI_API_KEY,
-            base_url="https://api.x.ai/v1",
+            base_url="https://api.groq.com/openai/v1",
         )
         self.model = settings.GROK_MODEL
 
@@ -61,7 +61,7 @@ class LLMService:
             except RateLimitError as exc:
                 last_exc = exc
                 wait = 2 ** attempt
-                logger.warning("Rate-limited by xAI API; retrying in %ds (attempt %d/3)", wait, attempt + 1)
+                logger.warning("Rate-limited by Groq API; retrying in %ds (attempt %d/3)", wait, attempt + 1)
                 await asyncio.sleep(wait)
 
             except APIStatusError as exc:

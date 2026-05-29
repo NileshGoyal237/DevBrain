@@ -70,6 +70,31 @@ class CodeReview(Base):
         back_populates="code_reviews",
     )
 
+    def __init__(self, **kwargs):
+        # Extract fields that belong to the `review` dict
+        review_fields = ["score", "annotations", "complexity", "edge_cases", "improvements", "best_practices", "summary"]
+        review_dict = kwargs.pop("review", {}) or {}
+        for field in review_fields:
+            if field in kwargs:
+                review_dict[field] = kwargs.pop(field)
+        
+        # Keep track of custom/missing fields by storing them in the JSONB review dict
+        if "context" in kwargs:
+            review_dict["context"] = kwargs.pop("context")
+        if "reflection_score" in kwargs:
+            review_dict["reflection_score"] = kwargs.pop("reflection_score")
+            
+        kwargs["review"] = review_dict
+        super().__init__(**kwargs)
+
+    @property
+    def score(self) -> int:
+        return self.review.get("score", 0) if isinstance(self.review, dict) else 0
+
+    @property
+    def summary(self) -> str:
+        return self.review.get("summary", "") if isinstance(self.review, dict) else ""
+
     def __repr__(self) -> str:
         score = self.review.get("score") if isinstance(self.review, dict) else "?"
         return (

@@ -48,8 +48,12 @@ class Challenge(Base):
     # [{"input": [2, 7, 11, 15], "target": 9, "expected": [0, 1]}, ...]
     test_cases: Mapped[list] = mapped_column(JSONB, nullable=False)
 
+    constraints: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    examples: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # ── Reference solution (nullable — not always revealed) ───────────────────
     solution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    starter_code: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # ── Timestamps ────────────────────────────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(
@@ -111,7 +115,7 @@ class ChallengeAttempt(Base):
 
     # ── Timing ────────────────────────────────────────────────────────────────
     # Duration in seconds
-    time_taken: Mapped[int] = mapped_column(Integer, nullable=False)
+    time_taken: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # ── Timestamps ────────────────────────────────────────────────────────────
     attempted_at: Mapped[datetime] = mapped_column(
@@ -130,6 +134,22 @@ class ChallengeAttempt(Base):
         "User",
         back_populates="challenge_attempts",
     )
+
+    @property
+    def submitted_code(self) -> str:
+        return self.code
+
+    @submitted_code.setter
+    def submitted_code(self, value: str) -> None:
+        self.code = value
+
+    @property
+    def submitted_at(self) -> datetime:
+        return self.attempted_at
+
+    @submitted_at.setter
+    def submitted_at(self, value: datetime) -> None:
+        self.attempted_at = value
 
     def __repr__(self) -> str:
         return (

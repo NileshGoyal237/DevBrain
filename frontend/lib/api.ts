@@ -145,19 +145,54 @@ export async function getCurrentUser(): Promise<User> {
 }
 
 // ---------------------------------------------------------------------------
+// Response Mappers / Transformers
+// ---------------------------------------------------------------------------
+
+function transformSkillProfile(p: any): any {
+  if (!p) return null;
+  const skillsPercent: Record<string, number> = {};
+  for (const [lang, score] of Object.entries(p.skills ?? {})) {
+    skillsPercent[lang] = Math.round((score as number) * 100);
+  }
+  const topLangs = Object.keys(skillsPercent).sort((a, b) => skillsPercent[b] - skillsPercent[a]);
+  
+  return {
+    id: p.user_id,
+    user_id: p.user_id,
+    skills: skillsPercent,
+    top_languages: topLangs,
+    total_repos: p.repo_count ?? 0,
+    created_at: p.analyzed_at,
+    updated_at: p.analyzed_at
+  };
+}
+
+function transformRoadmap(r: any): any {
+  if (!r) return null;
+  return {
+    ...r,
+    weeks: r.plan?.weeks ?? []
+  };
+}
+
+// ---------------------------------------------------------------------------
 // GitHub / Skill Analysis
 // ---------------------------------------------------------------------------
 
 /** Kick off repo analysis. Pass `github_token` if user provided a PAT. */
 export async function analyzeGithub(
-  opts?: GithubAnalyzeRequest,
-): Promise<GithubAnalyzeResponse> {
-  return apiRequest<GithubAnalyzeResponse>("POST", "/github/analyze", opts ?? {});
+  opts?: GithubAnalyzeRequest | string,
+): Promise<any> {
+  const body: GithubAnalyzeRequest =
+    typeof opts === "string" ? { github_token: opts } : (opts ?? {});
+  const res = await apiRequest<any>("POST", "/github/analyze", body);
+  return transformSkillProfile(res);
 }
 
 /** Retrieve the latest computed skill profile. */
-export async function getSkillProfile(): Promise<SkillProfile> {
-  return apiRequest<SkillProfile>("GET", "/github/profile");
+export async function getSkillProfile(): Promise<any> {
+  const res = await apiRequest<any>("GET", "/github/profile");
+  return transformSkillProfile(res);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,15 +202,19 @@ export async function getSkillProfile(): Promise<SkillProfile> {
 /** Generate (or regenerate) a weekly learning roadmap for the given role. */
 export async function generateRoadmap(
   target_role: string,
-): Promise<Roadmap> {
+): Promise<any> {
   const body: GenerateRoadmapRequest = { target_role };
-  return apiRequest<Roadmap>("POST", "/roadmap/generate", body);
+  const res = await apiRequest<any>("POST", "/roadmap/generate", body);
+  return transformRoadmap(res);
 }
 
 /** Fetch the currently active roadmap. */
-export async function getCurrentRoadmap(): Promise<Roadmap> {
-  return apiRequest<Roadmap>("GET", "/roadmap/current");
+export async function getCurrentRoadmap(): Promise<any> {
+  const res = await apiRequest<any>("GET", "/roadmap/current");
+  return transformRoadmap(res);
 }
+
+export { getCurrentRoadmap as getRoadmap };
 
 // ---------------------------------------------------------------------------
 // Challenges
@@ -190,17 +229,63 @@ export async function generateChallenge(): Promise<Challenge> {
 export async function submitChallenge(
   id: string,
   code: string,
-): Promise<SubmitChallengeResponse> {
-  return apiRequest<SubmitChallengeResponse>(
+): Promise<any> {
+  const res = await apiRequest<any>(
     "POST",
     `/challenges/${id}/submit`,
     { code },
   );
+  if (!res) return null;
+
+  const outputLines = res.output ? res.output.split("\n") : [];
+  const testResults = outputLines.map((line: string) => {
+    const passed = line.includes("✅");
+    let error: string | undefined = undefined;
+    let expected: string | undefined = undefined;
+    let got: string | undefined = undefined;
+    
+    if (!passed) {
+      error = line;
+      const match = line.match(/expected\s+['"]?([^'"]+)['"]?,\s+got\s+['"]?([^'"]+)['"]?/);
+      if (match) {
+        expected = match[1];
+        got = match[2];
+      }
+    }
+    
+    return {
+      passed,
+      input: "",
+      expected,
+      got,
+      error
+    };
+  });
+
+  const testsTotal = res.tests_total ?? 1;
+  const testsPassed = res.tests_passed ?? 0;
+  const score = Math.round((testsPassed / testsTotal) * 100);
+
+  return {
+    passed: res.passed,
+    test_results: testResults,
+    feedback: res.feedback,
+    score
+  };
 }
 
 /** Get the user's challenge attempt history. */
-export async function getChallengeHistory(): Promise<ChallengeAttempt[]> {
-  return apiRequest<ChallengeAttempt[]>("GET", "/challenges/history");
+export async function getChallengeHistory(): Promise<any[]> {
+  const items = await apiRequest<any[]>("GET", "/challenges/history");
+  if (!items) return [];
+  return items.map(item => ({
+    id: item.attempt_id,
+    title: item.challenge_title,
+    language: "python",
+    passed: item.passed,
+    score: Math.round((item.tests_passed / (item.tests_total || 1)) * 100),
+    created_at: item.submitted_at
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -212,16 +297,39 @@ export async function submitCodeReview(
   code: string,
   language: string,
   context?: string,
-): Promise<CodeReview> {
+): Promise<any> {
   const body: SubmitCodeReviewRequest = { code, language, context };
-  return apiRequest<CodeReview>("POST", "/review/submit", body);
+  const res = await apiRequest<any>("POST", "/review/submit", body);
+
+  if (!res || !res.review) return null;
+
+  const review = res.review;
+  return {
+    id: res.review_id,
+    user_id: "",
+    code: code,
+    language: language,
+    context: context || null,
+    score: review.score ?? 0,
+    time_complexity: review.complexity?.time ?? "O(?)",
+    space_complexity: review.complexity?.space ?? "O(?)",
+    reflection_loops: res.reflection_loops ?? 0,
+    summary: review.summary ?? "",
+    annotations: (review.annotations ?? []).map((a: any) => ({
+      line: a.line,
+      message: `${a.issue} (Fix: ${a.fix})`
+    })),
+    edge_cases: review.edge_cases ?? [],
+    improvements: (review.improvements ?? []).map((i: any) => ({
+      description: `${i.title}: ${i.description}`,
+      code: i.code_example
+    })),
+    best_practices: review.best_practices ?? [],
+    reviewed_at: new Date().toISOString()
+  };
 }
 
-/**
- * Open an SSE stream for real-time code review tokens.
- * `onChunk` is called for every token that arrives.
- * Returns a cleanup function — call it to close the stream early.
- */
+/** Open an SSE stream for real-time code review tokens. */
 export function streamCodeReview(
   code: string,
   language: string,
@@ -250,13 +358,22 @@ export function streamCodeReview(
     onError?.(err);
   };
 
-  // Return cleanup
   return () => es.close();
 }
 
 /** Get code review history for the current user. */
-export async function getReviewHistory(): Promise<CodeReview[]> {
-  return apiRequest<CodeReview[]>("GET", "/review/history");
+export async function getReviewHistory(): Promise<any[]> {
+  const items = await apiRequest<any[]>("GET", "/review/history");
+  if (!items) return [];
+  return items.map(item => ({
+    id: item.review_id,
+    language: item.language,
+    score: item.score,
+    summary: item.summary,
+    code_preview: item.code_preview,
+    reflection_loops: item.reflection_loops,
+    created_at: item.created_at
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -283,17 +400,22 @@ export async function searchResources(
 /** Start a new interview session. */
 export async function startInterview(
   mode: "dsa" | "system_design",
-): Promise<InterviewSession> {
+): Promise<any> {
   const body: StartInterviewRequest = { mode };
-  return apiRequest<InterviewSession>("POST", "/interview/start", body);
+  const res = await apiRequest<any>("POST", "/interview/start", body);
+  if (!res) return null;
+  return {
+    ...res,
+    opening_message: res.first_question
+  };
 }
 
 /** Send a message in an existing interview session. */
 export async function sendInterviewMessage(
   session_id: string,
   message: string,
-): Promise<SendInterviewMessageResponse> {
-  return apiRequest<SendInterviewMessageResponse>(
+): Promise<any> {
+  return apiRequest<any>(
     "POST",
     `/interview/${session_id}/message`,
     { message },
@@ -305,8 +427,28 @@ export async function sendInterviewMessage(
 // ---------------------------------------------------------------------------
 
 /** Get the full progress dashboard data. */
-export async function getProgressDashboard(): Promise<ProgressDashboard> {
-  return apiRequest<ProgressDashboard>("GET", "/progress/dashboard");
+export async function getProgressDashboard(): Promise<any> {
+  const res = await apiRequest<any>("GET", "/progress/dashboard");
+  if (!res) return null;
+
+  const delta7d: Record<string, number> = {};
+  for (const [k, v] of Object.entries(res.skill_delta_7d ?? {})) {
+    delta7d[k] = Math.round((v as number) * 100);
+  }
+  const delta30d: Record<string, number> = {};
+  for (const [k, v] of Object.entries(res.skill_delta_30d ?? {})) {
+    delta30d[k] = Math.round((v as number) * 100);
+  }
+
+  return {
+    ...res,
+    skill_delta_7d: delta7d,
+    skill_delta_30d: delta30d,
+    recent_activity: [
+      `Completed challenges with ${Math.round(res.challenge_pass_rate * 100)}% pass rate`,
+      `Active streak is currently ${res.streak} day(s)`
+    ]
+  };
 }
 
 /** Get only streak information (lightweight). */

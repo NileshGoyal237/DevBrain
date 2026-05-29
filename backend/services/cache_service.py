@@ -48,6 +48,18 @@ class CacheService:
         except Exception as exc:
             logger.warning("Cache DELETE failed for key=%s: %s", key, exc)
 
+    async def increment(self, key: str, ttl: int | None = None) -> int:
+        """Increment a key and optionally set its TTL on first creation."""
+        try:
+            val = await self.redis.incr(key)
+            if ttl is not None and val == 1:
+                await self.redis.expire(key, ttl)
+            return val
+        except Exception as exc:
+            logger.warning("Cache INCR failed for key=%s: %s", key, exc)
+            return 1
+
+
     # ------------------------------------------------------------------
     # Skill profile helpers
     # ------------------------------------------------------------------

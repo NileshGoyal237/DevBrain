@@ -135,16 +135,21 @@ def _build_initial_state(
 ) -> DevBrainState:
     """Construct the initial LangGraph state for a code review run."""
     return DevBrainState(
-        user=user,
+        user_id=str(user.id),
+        github_username=user.github_username or "",
+        intent="review",
+        current_agent="code_reviewer",
         user_input=json.dumps({"code": code, "language": language, "context": context}),
-        structured_output={"code": code, "language": language, "context": context},
         agent_output="",
+        structured_output={"code": code, "language": language, "context": context},
+        skill_profile={},
         conversation_history=[],
-        iteration_count=0,
+        rag_context=[],
         reflection_score=1.0,
+        iteration_count=0,
         max_iterations=3,
-        task_type="code_review",
-        metadata={},
+        error=None,
+        should_continue=True,
     )
 
 
@@ -191,7 +196,7 @@ async def submit_review(
     try:
         final_state: DevBrainState = await langgraph_app.ainvoke(
             initial_state,
-            config={"configurable": {"task_type": "code_review"}},
+            config={"configurable": {"thread_id": f"review-{uuid.uuid4().hex}"}},
         )
     except Exception as exc:
         logger.error("LangGraph code review failed: %s", exc)

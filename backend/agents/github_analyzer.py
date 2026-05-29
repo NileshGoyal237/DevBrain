@@ -28,6 +28,61 @@ from services.llm_service import llm
 logger = logging.getLogger(__name__)
 
 
+def _fallback_skill_summary(
+    github_username: str,
+    skills: dict[str, float],
+    repo_count: int,
+) -> str:
+    """Deterministic summary when the LLM is unavailable (no xAI credits, etc.)."""
+    if not skills:
+        return (
+            f"@{github_username} has {repo_count} public repositories on GitHub, "
+            "but no language data was detected yet. Push code to your repos or "
+            "add a GitHub token with repo access and run analysis again."
+        )
+
+    ranked = sorted(skills.items(), key=lambda x: x[1], reverse=True)
+    top = ", ".join(lang for lang, _ in ranked[:3])
+    weak = ranked[-1][0] if ranked else "general fundamentals"
+    return (
+        f"Based on {repo_count} repositories, @{github_username}'s strongest areas "
+        f"are {top}. A good growth focus is {weak}, where your score is lowest. "
+        "Generate a roadmap next to get a week-by-week learning plan."
+    )
+
+
+async def _build_skill_summary(
+    github_username: str,
+    skills: dict[str, float],
+    repo_count: int,
+) -> str:
+    skill_lines = "\n".join(
+        f"  {lang}: {score:.2f}"
+        for lang, score in sorted(skills.items(), key=lambda x: x[1], reverse=True)[:10]
+    )
+    prompt = (
+        f"You are a senior engineering career coach.\n"
+        f"A developer named '{github_username}' has the following language "
+        f"proficiency scores derived from their GitHub repositories "
+        f"(0 = no experience, 1 = expert):\n\n"
+        f"{skill_lines}\n\n"
+        f"Write exactly 3 sentences that:\n"
+        f"1. Describe their primary technical strengths.\n"
+        f"2. Identify one clear gap or growth area.\n"
+        f"3. Give one actionable career recommendation.\n"
+        f"Be encouraging, specific, and concise."
+    )
+    try:
+        return await llm.call(prompt)
+    except Exception as exc:
+        logger.warning(
+            "LLM summary failed for %s (%s) — using fallback summary.",
+            github_username,
+            exc,
+        )
+        return _fallback_skill_summary(github_username, skills, repo_count)
+
+
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Pydantic response schema (used by the /github routes)                       #
 # ═══════════════════════════════════════════════════════════════════════════ #
@@ -81,7 +136,7 @@ async def github_analyzer_node(state: dict) -> dict:
             if raw_input.startswith("ghp_") or raw_input.startswith("github_pat_"):
                 token = raw_input.strip()
             else:
-                token = getattr(settings, "GITHUB_PAT", None)
+                token = settings.GITHUB_PAT or None
 
             profile_data: dict = await github_service.analyze_skill_profile(
                 github_username, token
@@ -89,31 +144,13 @@ async def github_analyzer_node(state: dict) -> dict:
             skills = profile_data.get("skills", {})
             repo_count = profile_data.get("repo_count", 0)
 
-            # ── 3. LLM narrative summary ───────────────────────────────────
-            skill_lines = "\n".join(
-                f"  {lang}: {score:.2f}" for lang, score in sorted(
-                    skills.items(), key=lambda x: x[1], reverse=True
-                )[:10]
-            )
-            prompt = (
-                f"You are a senior engineering career coach.\n"
-                f"A developer named '{github_username}' has the following language "
-                f"proficiency scores derived from their GitHub repositories "
-                f"(0 = no experience, 1 = expert):\n\n"
-                f"{skill_lines}\n\n"
-                f"Write exactly 3 sentences that:\n"
-                f"1. Describe their primary technical strengths.\n"
-                f"2. Identify one clear gap or growth area.\n"
-                f"3. Give one actionable career recommendation.\n"
-                f"Be encouraging, specific, and concise."
-            )
-            summary = await llm.complete(prompt)
+            # ── 3. Narrative summary (LLM with deterministic fallback) ───────
+            summary = await _build_skill_summary(github_username, skills, repo_count)
 
             # ── 4a. Store in Redis (24 h) ──────────────────────────────────
             await cache.set_skill_profile(
                 user_id,
                 {"skills": skills, "repo_count": repo_count, "summary": summary},
-                ttl=86_400,
             )
 
         # ── 4b. Upsert SkillProfile in PostgreSQL ──────────────────────────

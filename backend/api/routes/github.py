@@ -16,7 +16,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from agents.github_analyzer import SkillProfileResponse, github_analyzer_node
 from agents.orchestrator import DevBrainState, app as graph_app
@@ -50,7 +52,7 @@ class AnalyzeRequest(BaseModel):
 async def analyze_github(
     body: AnalyzeRequest,
     current_user: User = Depends(get_current_user),
-    db=Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Triggers a full GitHub skill-profile analysis.
@@ -105,13 +107,40 @@ async def analyze_github(
         )
 
     structured = final_state.get("structured_output", {})
+    skills = structured.get("skills", {})
+    repo_count = structured.get("repo_count", 0)
+    summary = structured.get("summary", "")
+    analyzed_at = datetime.utcnow()
+
+    # Persist on the request DB session so GET /github/profile sees the row immediately.
+    result = await db.execute(
+        select(SkillProfile).where(SkillProfile.user_id == current_user.id)
+    )
+    profile = result.scalar_one_or_none()
+    if profile:
+        profile.skills = skills
+        profile.repo_count = repo_count
+        profile.summary = summary
+        profile.analyzed_at = analyzed_at
+    else:
+        db.add(
+            SkillProfile(
+                user_id=current_user.id,
+                skills=skills,
+                repo_count=repo_count,
+                summary=summary,
+                analyzed_at=analyzed_at,
+            )
+        )
+    await db.flush()
+
     return SkillProfileResponse(
-        user_id=user_id,
+        user_id=str(current_user.id),
         github_username=current_user.github_username,
-        skills=structured.get("skills", {}),
-        summary=structured.get("summary", ""),
-        repo_count=structured.get("repo_count", 0),
-        analyzed_at=datetime.utcnow(),
+        skills=skills,
+        summary=summary,
+        repo_count=repo_count,
+        analyzed_at=analyzed_at,
     )
 
 
@@ -128,14 +157,18 @@ async def analyze_github(
 )
 async def get_github_profile(
     current_user: User = Depends(get_current_user),
-    db=Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Returns the persisted SkillProfile from PostgreSQL.
     Returns **404** if the user has never run an analysis.
     """
     result = await db.execute(
-        select(SkillProfile).where(SkillProfile.user_id == current_user.id)
+        select(SkillProfile)
+        .where(SkillProfile.user_id == current_user.id)
+        .options(selectinload(SkillProfile.user))
+        .order_by(SkillProfile.analyzed_at.desc())
+        .limit(1)
     )
     profile: Optional[SkillProfile] = result.scalar_one_or_none()
 
@@ -147,9 +180,9 @@ async def get_github_profile(
 
     return SkillProfileResponse(
         user_id=str(profile.user_id),
-        github_username=profile.github_username,
+        github_username=current_user.github_username,
         skills=profile.skills,
-        summary=profile.summary,
-        repo_count=profile.repo_count,
+        summary=profile.summary or "",
+        repo_count=profile.repo_count or 0,
         analyzed_at=profile.analyzed_at,
     )

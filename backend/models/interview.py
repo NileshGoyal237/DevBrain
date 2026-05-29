@@ -68,6 +68,63 @@ class InterviewSession(Base):
         back_populates="interview_sessions",
     )
 
+    def __init__(self, **kwargs):
+        # Map conversation_history -> messages
+        if "conversation_history" in kwargs:
+            kwargs["messages"] = kwargs.pop("conversation_history")
+            
+        # Map overall_score -> score
+        if "overall_score" in kwargs:
+            kwargs["score"] = kwargs.pop("overall_score")
+            
+        # Map structured_output -> topics_covered (JSONB)
+        structured_output = kwargs.pop("structured_output", {}) or {}
+        
+        # If completed is passed, store inside structured_output
+        if "completed" in kwargs:
+            structured_output["completed"] = kwargs.pop("completed")
+            
+        # If updated_at is passed, drop/ignore it (or store inside structured_output)
+        if "updated_at" in kwargs:
+            kwargs.pop("updated_at")
+            
+        kwargs["topics_covered"] = structured_output
+        super().__init__(**kwargs)
+
+    @property
+    def conversation_history(self) -> list:
+        return self.messages
+
+    @conversation_history.setter
+    def conversation_history(self, value: list) -> None:
+        self.messages = value
+
+    @property
+    def overall_score(self) -> float | None:
+        return self.score
+
+    @overall_score.setter
+    def overall_score(self, value: float | None) -> None:
+        self.score = value
+
+    @property
+    def structured_output(self) -> dict:
+        return self.topics_covered if isinstance(self.topics_covered, dict) else {}
+
+    @structured_output.setter
+    def structured_output(self, value: dict) -> None:
+        self.topics_covered = value
+
+    @property
+    def completed(self) -> bool:
+        return self.structured_output.get("completed", False)
+
+    @completed.setter
+    def completed(self, value: bool) -> None:
+        so = dict(self.structured_output)
+        so["completed"] = value
+        self.structured_output = so
+
     def __repr__(self) -> str:
         return (
             f"<InterviewSession id={self.id} mode={self.mode} "

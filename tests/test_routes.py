@@ -62,7 +62,7 @@ class TestAuthRoutes:
         assert response.status_code == 200
         body = response.json()
         # At minimum the response should contain the user's username
-        assert body.get("username") == mock_user.username or "id" in body
+        assert body.get("username") == mock_user.github_username or "id" in body
 
 
 # ===========================================================================
@@ -77,25 +77,35 @@ class TestGitHubRoutes:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
-    @patch("api.routes.github.github_service")
+    @patch("agents.github_analyzer.llm")
     @patch("api.routes.github.cache")
+    @patch("agents.github_analyzer.cache")
+    @patch("agents.github_analyzer.github_service")
     async def test_github_analyze_success(
         self,
-        mock_cache,
         mock_github,
+        mock_agent_cache,
+        mock_route_cache,
+        mock_llm,
         async_client: AsyncClient,
         auth_headers: dict,
     ):
-        mock_cache.get_skill_profile = AsyncMock(return_value=None)
-        mock_cache.set_skill_profile = AsyncMock(return_value=True)
-        mock_github.get_user_repos = AsyncMock(
-            return_value=[{"name": "my-repo", "language": "Python"}]
+        mock_route_cache.increment = AsyncMock(return_value=1)
+        mock_agent_cache.get_skill_profile = AsyncMock(return_value=None)
+        mock_agent_cache.set_skill_profile = AsyncMock(return_value=True)
+        mock_github.analyze_skill_profile = AsyncMock(
+            return_value={
+                "skills": {"Python": 0.80, "Shell": 0.25},
+                "repo_count": 1,
+            }
         )
-        mock_github.analyze_skills = AsyncMock(
-            return_value={"Python": 0.80, "Shell": 0.25}
-        )
+        mock_llm.call = AsyncMock(return_value="mock narrative summary")
 
-        response = await async_client.post("/github/analyze", headers=auth_headers)
+        response = await async_client.post(
+            "/github/analyze",
+            json={},
+            headers=auth_headers,
+        )
         assert response.status_code == 200
         body = response.json()
         assert "skills" in body
@@ -116,6 +126,21 @@ SAMPLE_REVIEW_RESPONSE = {
 }
 
 
+MOCK_REVIEW_STATE = {
+    "structured_output": {
+        "score": 88,
+        "annotations": [],
+        "complexity": {"time": "O(N)", "space": "O(1)"},
+        "edge_cases": [],
+        "improvements": [],
+        "best_practices": [],
+        "summary": "Looks good overall.",
+    },
+    "iteration_count": 2,
+    "reflection_score": 0.88,
+}
+
+
 class TestReviewRoutes:
 
     @pytest.mark.asyncio
@@ -127,49 +152,40 @@ class TestReviewRoutes:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
-    @patch("api.routes.review.run_code_review_graph")
+    @patch("api.routes.review.langgraph_app")
     async def test_review_submit_success(
         self,
         mock_graph,
         async_client: AsyncClient,
         auth_headers: dict,
     ):
-        mock_graph.return_value = AsyncMock(return_value=SAMPLE_REVIEW_RESPONSE)
-        mock_graph.side_effect = None
-        mock_graph.return_value = SAMPLE_REVIEW_RESPONSE
-        # Patch the actual async graph runner used inside the route
-        with patch(
-            "api.routes.review.run_code_review_graph",
-            new=AsyncMock(return_value=SAMPLE_REVIEW_RESPONSE),
-        ):
-            response = await async_client.post(
-                "/review/submit",
-                json={"code": "def foo(): pass", "language": "python"},
-                headers=auth_headers,
-            )
-        assert response.status_code == 200
+        mock_graph.ainvoke = AsyncMock(return_value=MOCK_REVIEW_STATE)
+        response = await async_client.post(
+            "/review/submit",
+            json={"code": "def foo(): pass", "language": "python"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
         assert "review" in response.json()
 
     @pytest.mark.asyncio
-    @patch("api.routes.review.run_code_review_graph",
-           new_callable=lambda: lambda: AsyncMock(return_value=SAMPLE_REVIEW_RESPONSE))
+    @patch("api.routes.review.langgraph_app")
     async def test_review_has_reflection_count(
         self,
+        mock_graph,
         async_client: AsyncClient,
         auth_headers: dict,
     ):
-        with patch(
-            "api.routes.review.run_code_review_graph",
-            new=AsyncMock(return_value=SAMPLE_REVIEW_RESPONSE),
-        ):
-            response = await async_client.post(
-                "/review/submit",
-                json={"code": "def bar(x): return x * 2", "language": "python"},
-                headers=auth_headers,
-            )
-        if response.status_code == 200:
-            body = response.json()
-            assert isinstance(body.get("reflection_loops"), int)
+        mock_graph.ainvoke = AsyncMock(return_value=MOCK_REVIEW_STATE)
+        response = await async_client.post(
+            "/review/submit",
+            json={"code": "def bar(x): return x * 2", "language": "python"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert isinstance(body.get("reflection_loops"), int)
+        assert body.get("reflection_loops") == 1
 
 
 # ===========================================================================
@@ -184,20 +200,23 @@ class TestResourceRoutes:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
+    @patch("agents.resource_agent.llm")
     @patch("api.routes.resources.vector_store")
     async def test_resources_search_returns_list(
         self,
         mock_vs,
+        mock_llm,
         async_client: AsyncClient,
         auth_headers: dict,
     ):
-        mock_vs.search = AsyncMock(
+        mock_llm.call = AsyncMock(return_value="Python")
+        mock_vs.search_resources = AsyncMock(
             return_value=[
                 {
                     "title": "Real Python — Data Structures",
                     "url": "https://realpython.com/data-structures",
                     "snippet": "In-depth tutorial on Python data structures.",
-                    "score": 0.93,
+                    "distance": 0.1,
                     "source": "chromadb",
                 }
             ]
@@ -234,23 +253,28 @@ class TestProgressRoutes:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
-    @patch("api.routes.progress.build_dashboard")
+    @patch("api.routes.progress.progress_agent_node")
     async def test_progress_dashboard_returns_streak(
         self,
-        mock_dashboard_fn,
+        mock_progress_fn,
         async_client: AsyncClient,
         auth_headers: dict,
         mock_user,
     ):
-        mock_dashboard_fn.return_value = AsyncMock(return_value=MOCK_DASHBOARD)
-        with patch(
-            "api.routes.progress.build_dashboard",
-            new=AsyncMock(return_value=MOCK_DASHBOARD),
-        ):
-            response = await async_client.get(
-                "/progress/dashboard",
-                headers=auth_headers,
-            )
+        mock_progress_fn.return_value = {
+            "structured_output": {
+                "skill_delta_7d": {"Python": 0.12, "SQL": 0.08},
+                "skill_delta_30d": {"Python": 0.25, "SQL": 0.15},
+                "streak": 7,
+                "exam_readiness": {"Python": 68},
+                "challenge_pass_rate": 0.85,
+                "weekly_digest": "Great progress this week!",
+            }
+        }
+        response = await async_client.get(
+            "/progress/dashboard",
+            headers=auth_headers,
+        )
         assert response.status_code == 200
         body = response.json()
         assert "streak" in body
