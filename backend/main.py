@@ -3,6 +3,11 @@ backend/main.py
 DevBrain API — FastAPI application entry point.
 """
 
+import os
+
+# Must be set before chromadb is imported (suppresses broken posthog telemetry on Windows)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -50,11 +55,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.FRONTEND_URL,
-        "http://localhost:3000",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -162,7 +162,7 @@ def _count_reflection_loops(final_state: DevBrainState) -> int:
 
 
 @router.post(
-    "/review/submit",
+    "/submit",
     response_model=ReviewSubmitResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Submit code for AI review with reflection loop",
@@ -277,7 +277,7 @@ async def _token_stream(code: str, language: str, context: str) -> AsyncGenerato
 
 
 @router.get(
-    "/review/stream",
+    "/stream",
     summary="Stream a code review as Server-Sent Events",
     response_class=StreamingResponse,
 )
@@ -311,7 +311,7 @@ async def stream_review(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get(
-    "/review/history",
+    "/history",
     response_model=list[ReviewHistoryItem],
     summary="Get the last 10 code reviews for the authenticated user",
 )

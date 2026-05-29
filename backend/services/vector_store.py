@@ -9,6 +9,7 @@ Three collections:
 import logging
 
 import chromadb
+from chromadb.config import Settings as ChromaSettings
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 class VectorStoreService:
     def __init__(self) -> None:
-        self._client = chromadb.PersistentClient(path="./data/chroma")
+        # Disable telemetry — avoids posthog/chroma version mismatch noise on startup
+        self._client = chromadb.PersistentClient(
+            path="./data/chroma",
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
         self._emb_fn = SentenceTransformerEmbeddingFunction(
             model_name="all-MiniLM-L6-v2"
         )

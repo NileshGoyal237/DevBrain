@@ -142,7 +142,7 @@ from agents.github_analyzer import github_analyzer_node  # noqa: E402
 from agents.roadmap_agent import roadmap_agent_node  # noqa: E402
 from agents.challenge_agent import challenge_agent_node  # noqa: E402
 from agents.progress_agent import progress_agent_node  # noqa: E402
-from agents.code_review_agent import code_reviewer_node  # noqa: E402
+from agents.code_review_agent import code_review_node as code_reviewer_node  # noqa: E402
 from agents.code_review_agent import reflection_node as reflector_node  # noqa: E402
 from agents.interview_agent import interview_agent_node  # noqa: E402
 from agents.resource_agent import resource_agent_node  # noqa: E402
@@ -166,6 +166,7 @@ _builder.add_node("code_reviewer", code_reviewer_node)
 _builder.add_node("reflector", reflector_node)
 _builder.add_node("interview_agent", interview_agent_node)
 _builder.add_node("resource_agent", resource_agent_node)
+_builder.add_node("chat_stub", chat_stub_node)
 
 # ── Entry point ────────────────────────────────────────────────────────────
 _builder.set_entry_point("orchestrator")

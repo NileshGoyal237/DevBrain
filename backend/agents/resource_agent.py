@@ -437,27 +437,40 @@ _SEED_RESOURCES: list[dict[str, str]] = [
 ]
 
 
-async def seed_resource_collection() -> int:
+async def seed_resource_collection() -> tuple[int, list[str]]:
     """
     Seed ChromaDB with 20 curated resources at application startup.
     Idempotent — uses the URL as a stable document ID so duplicates are upserted.
 
-    Returns the number of resources successfully seeded.
+    Returns (seeded_count, error_messages).
     """
     seeded = 0
+    errors: list[str] = []
+    total = len(_SEED_RESOURCES)
+
     for resource in _SEED_RESOURCES:
         try:
-            await vector_store.add_resource(
+            vector_store.add_resource(
+                resource_id=resource["url"],
                 title=resource["title"],
-                url=resource["url"],
                 description=resource["description"],
                 topic=resource["topic"],
                 difficulty=resource["difficulty"],
+                url=resource["url"],
                 source=urlparse(resource["url"]).netloc.lstrip("www."),
             )
             seeded += 1
         except Exception as exc:
-            logger.warning("Failed to seed resource '%s': %s", resource["title"], exc)
+            msg = f"{resource['title']}: {exc}"
+            errors.append(msg)
+            logger.warning("Failed to seed resource: %s", msg)
 
-    logger.info("seed_resource_collection complete — %d/%d resources seeded.", seeded, len(_SEED_RESOURCES))
-    return seeded
+    logger.info(
+        "seed_resource_collection complete — %d/%d resources seeded.",
+        seeded,
+        total,
+    )
+    if seeded == 0 and errors:
+        logger.error("All seed operations failed. First error: %s", errors[0])
+
+    return seeded, errors

@@ -28,7 +28,7 @@ from services.llm_service import llm
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/challenges", tags=["challenges"])
+router = APIRouter(tags=["challenges"])
 
 # ── Response schemas ──────────────────────────────────────────────────────
 

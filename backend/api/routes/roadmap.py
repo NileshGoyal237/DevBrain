@@ -27,7 +27,7 @@ from services.cache_service import cache
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/roadmap", tags=["roadmap"])
+router = APIRouter(tags=["roadmap"])
 
 # Allowed target roles
 _ALLOWED_ROLES: set[str] = {"SDE Intern", "Backend", "ML", "Full-Stack", "DevOps"}

@@ -151,7 +151,7 @@ async def _get_session_or_404(
 
 
 @router.post(
-    "/interview/start",
+    "/start",
     response_model=StartInterviewResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Start a new interview session and receive the first question",
@@ -236,7 +236,7 @@ async def start_interview(
 
 
 @router.post(
-    "/interview/{session_id}/message",
+    "/{session_id}/message",
     response_model=SendMessageResponse,
     summary="Send an answer and receive feedback + the next question",
 )
@@ -338,7 +338,7 @@ async def send_message(
 
 
 @router.get(
-    "/interview/{session_id}/report",
+    "/{session_id}/report",
     response_model=SessionReportResponse,
     summary="Get the final performance report for a completed session",
 )
@@ -385,7 +385,7 @@ async def get_session_report(
 
 
 @router.get(
-    "/interview/history",
+    "/history",
     response_model=list[InterviewHistoryItem],
     summary="Get the last 5 interview sessions for the authenticated user",
 )

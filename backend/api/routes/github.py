@@ -27,7 +27,7 @@ from services.cache_service import cache
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/github", tags=["github"])
+router = APIRouter()
 
 # ── Request body ──────────────────────────────────────────────────────────
 

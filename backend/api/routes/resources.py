@@ -1,9 +1,9 @@
 """
 Resources API Routes
 ====================
-GET   /resources/search   — Semantic search for learning resources (auth required)
-POST  /resources/seed     — Seed ChromaDB with curated resources (dev/admin only)
-GET   /resources/topics   — List topics currently indexed in ChromaDB
+GET   /resources/search   — (mounted at /search under /resources prefix)
+POST  /resources/seed     — Seed ChromaDB (mounted at /seed)
+GET   /resources/topics   — List indexed topics (mounted at /topics)
 """
 
 from __future__ import annotations
@@ -44,6 +44,8 @@ class ResourceSearchResponse(BaseModel):
 
 class SeedResponse(BaseModel):
     seeded: int
+    total: int = 0
+    hint: str | None = None
 
 
 class TopicsResponse(BaseModel):
@@ -56,7 +58,7 @@ class TopicsResponse(BaseModel):
 
 
 @router.get(
-    "/resources/search",
+    "/search",
     response_model=ResourceSearchResponse,
     summary="Search for learning resources on a given topic",
 )
@@ -147,7 +149,7 @@ def _extract_skill_profile(user: User) -> dict:
 
 
 @router.post(
-    "/resources/seed",
+    "/seed",
     response_model=SeedResponse,
     status_code=status.HTTP_200_OK,
     summary="Seed ChromaDB with curated resources (dev/admin only, no auth required)",
@@ -162,7 +164,9 @@ async def seed_resources() -> SeedResponse:
     remove it from the public router entirely.
     """
     try:
-        seeded_count = await seed_resource_collection()
+        from agents.resource_agent import _SEED_RESOURCES
+
+        seeded_count, errors = await seed_resource_collection()
     except Exception as exc:
         logger.error("Seeding failed: %s", exc)
         raise HTTPException(
@@ -170,14 +174,22 @@ async def seed_resources() -> SeedResponse:
             detail=f"Seed operation failed: {exc}",
         )
 
-    return SeedResponse(seeded=seeded_count)
+    hint = None
+    if seeded_count == 0:
+        hint = errors[0] if errors else "Restart uvicorn after code changes, then try again."
+
+    return SeedResponse(
+        seeded=seeded_count,
+        total=len(_SEED_RESOURCES),
+        hint=hint,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @router.get(
-    "/resources/topics",
+    "/topics",
     response_model=TopicsResponse,
     summary="List all topics currently indexed in ChromaDB",
 )
