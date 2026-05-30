@@ -146,6 +146,7 @@ export default function ReviewPage() {
   const [streamText, setStreamText] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const streamRef = useRef<ReturnType<typeof streamCodeReview> | null>(null);
 
   useEffect(() => {
@@ -157,9 +158,13 @@ export default function ReviewPage() {
     setLoading(true);
     setReview(null);
     setStreamText("");
+    setError(null);
     try {
       const r = await submitCodeReview(code, language, context || undefined);
+      if (!r) throw new Error("Empty response from server");
       setReview(r);
+    } catch (e: any) {
+      setError(e?.message ?? "Review failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -170,12 +175,19 @@ export default function ReviewPage() {
     setStreaming(true);
     setReview(null);
     setStreamText("");
-    streamRef.current = streamCodeReview(
-      code,
-      language,
-      (chunk) => setStreamText((p) => p + chunk),
-      () => setStreaming(false)
-    );
+    setError(null);
+    try {
+      streamRef.current = streamCodeReview(
+        code,
+        language,
+        (chunk) => setStreamText((p) => p + chunk),
+        () => setStreaming(false),
+        () => { setStreaming(false); setError("Stream connection failed."); }
+      );
+    } catch (e: any) {
+      setStreaming(false);
+      setError(e?.message ?? "Stream failed. Please try again.");
+    }
   };
 
   const handleLanguageChange = (lang: string) => {
@@ -198,6 +210,12 @@ export default function ReviewPage() {
           Multi-pass analysis with self-reflection loop — quality guaranteed
         </p>
       </div>
+
+      {error && (
+        <div className="bg-red-900/30 border border-red-500/50 rounded-xl px-4 py-3 text-red-400 text-sm flex items-center gap-2">
+          <span>⚠️</span> {error}
+        </div>
+      )}
 
       <div className="flex-1 grid grid-cols-1 xl:grid-cols-2 gap-4 min-h-0">
         {/* ── Left: Editor ── */}

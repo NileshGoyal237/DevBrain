@@ -3,7 +3,7 @@
 // =============================================================================
 // DevBrain AI — Skill Radar Chart
 // Uses recharts RadarChart. Shows up to 8 skills from the skill profile.
-// If skill_delta_7d is provided, renders +/- badge next to each axis label.
+// If delta is provided, renders +/- badge next to each axis label.
 // =============================================================================
 
 import {
@@ -21,9 +21,25 @@ import {
 // ---------------------------------------------------------------------------
 
 interface SkillRadarChartProps {
-  skills: Record<string, number>; // 0–1 scores
-  delta?: Record<string, number>; // optional 7-day deltas
+  /** Scores as 0–1 or 0–100 (auto-normalized). */
+  skills: Record<string, number>;
+  /** Optional 7-day deltas as 0–1 or percentage points (auto-normalized). */
+  delta?: Record<string, number>;
   className?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Normalization — api.ts sends 0–100; legacy paths may send 0–1
+// ---------------------------------------------------------------------------
+
+function normalizeScore(score: number): number {
+  if (score > 1) return Math.min(score / 100, 1);
+  return Math.max(0, Math.min(score, 1));
+}
+
+function normalizeDelta(delta: number): number {
+  if (Math.abs(delta) > 1) return delta / 100;
+  return delta;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,17 +55,17 @@ function CustomAxisLabel(props: {
   const { x = 0, y = 0, payload, delta } = props;
   if (!payload) return null;
 
-  const label     = payload.value;
-  const deltaVal  = delta?.[label] ?? null;
-  const hasDelta  = deltaVal !== null;
-  const isPos     = (deltaVal ?? 0) > 0;
-  const isNeg     = (deltaVal ?? 0) < 0;
+  const label = payload.value;
+  const rawDelta = delta?.[label] ?? null;
+  const hasDelta = rawDelta !== null;
+  const deltaVal = hasDelta ? normalizeDelta(rawDelta as number) : 0;
+  const isPos = deltaVal > 0;
+  const isNeg = deltaVal < 0;
 
-  // Determine anchor & offset based on horizontal position relative to centre
-  const cx       = 175; // approx chart centre (half of 350px radius area)
-  const anchor   = x < cx ? "end" : x > cx ? "start" : "middle";
+  const cx = 175;
+  const anchor = x < cx ? "end" : x > cx ? "start" : "middle";
   const deltaStr = hasDelta
-    ? `${isPos ? "+" : ""}${((deltaVal as number) * 100).toFixed(1)}%`
+    ? `${isPos ? "+" : ""}${(deltaVal * 100).toFixed(1)}%`
     : null;
 
   const badgeColor = isPos ? "#22c55e" : isNeg ? "#ef4444" : "#6366f1";
@@ -128,14 +144,16 @@ export default function SkillRadarChart({
   delta,
   className = "",
 }: SkillRadarChartProps) {
-  // Pick top 8 skills by score
   const topSkills = Object.entries(skills)
+    .map(([skill, score]) => [skill, normalizeScore(score)] as const)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 8);
 
   if (topSkills.length === 0) {
     return (
-      <div className={`flex items-center justify-center h-[350px] text-gray-500 text-sm ${className}`}>
+      <div
+        className={`flex items-center justify-center h-[350px] text-gray-500 text-sm ${className}`}
+      >
         No skill data yet. Connect GitHub to analyze your profile.
       </div>
     );
@@ -179,7 +197,6 @@ export default function SkillRadarChart({
         </RadarChart>
       </ResponsiveContainer>
 
-      {/* Legend */}
       <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
         {data.map(({ skill, score }) => (
           <div key={skill} className="flex items-center gap-1.5 text-xs">

@@ -104,22 +104,12 @@ async def _check_rate_limit(user_id: str) -> None:
     """
     key = f"{RATE_LIMIT_KEY_PREFIX}:{user_id}"
     try:
-        count_raw = await cache.get(key)
-        count = int(count_raw) if count_raw else 0
-
-        if count >= RATE_LIMIT_MAX:
+        allowed = await cache.rate_limit(key, limit=RATE_LIMIT_MAX, window=RATE_LIMIT_WINDOW)
+        if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Rate limit exceeded: {RATE_LIMIT_MAX} reviews per hour. Please wait.",
             )
-
-        # Increment; set TTL only on first hit to avoid resetting the window
-        new_count = count + 1
-        if count == 0:
-            await cache.set(key, new_count, expire=RATE_LIMIT_WINDOW)
-        else:
-            await cache.set(key, new_count)
-
     except HTTPException:
         raise
     except Exception as exc:
@@ -242,8 +232,8 @@ async def submit_review(
             review_id=review_id,
             code=body.code,
             language=body.language,
-            score=review_dict.get("score", 0),
-            summary=review_dict.get("summary", ""),
+            review_summary=review_dict.get("summary", ""),
+            user_id=str(current_user.id),
         )
     except Exception as exc:
         logger.warning("Vector store indexing failed (non-fatal): %s", exc)

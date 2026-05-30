@@ -95,6 +95,7 @@ async def analyze_github(
         "max_iterations": 3,
         "error": None,
         "should_continue": True,
+        "force_refresh": True,
     }
 
     # ── Run only the analyzer node (bypass full graph for direct invocation)

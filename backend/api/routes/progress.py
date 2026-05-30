@@ -76,11 +76,21 @@ async def get_dashboard(
     """
     user_id = str(current_user.id)
 
+    cached_dashboard = await cache.get_progress_dashboard(user_id)
+    if cached_dashboard:
+        return DashboardResponse(**cached_dashboard)
+
     # Resolve current skill profile from cache
     skill_profile: dict = {}
     cached = await cache.get_skill_profile(user_id)
     if cached:
-        skill_profile = {"skills": cached.get("skills", {})}
+        skill_profile = {
+            "skills": cached.get("skills", {}),
+            "summary": cached.get("summary", ""),
+            "frameworks": cached.get("frameworks", {}),
+            "engineering_practices": cached.get("engineering_practices", {}),
+            "repo_highlights": cached.get("repo_highlights", []),
+        }
 
     state = {
         "user_id": user_id,
@@ -103,7 +113,7 @@ async def get_dashboard(
     final_state = await progress_agent_node(state)
 
     structured = final_state.get("structured_output", {})
-    return DashboardResponse(
+    response = DashboardResponse(
         skill_delta_7d=structured.get("skill_delta_7d", {}),
         skill_delta_30d=structured.get("skill_delta_30d", {}),
         streak=structured.get("streak", 0),
@@ -111,6 +121,8 @@ async def get_dashboard(
         challenge_pass_rate=structured.get("challenge_pass_rate", 0.0),
         weekly_digest=structured.get("weekly_digest", "No digest available yet."),
     )
+    await cache.set_progress_dashboard(user_id, response.model_dump())
+    return response
 
 
 # ══════════════════════════════════════════════════════════════════════════ #

@@ -122,6 +122,7 @@ export default function ChallengesPage() {
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!localStorage.getItem("devbrain_token")) {
@@ -138,10 +139,13 @@ export default function ChallengesPage() {
   const handleGenerate = async () => {
     setGenerating(true);
     setResult(null);
+    setError(null);
     try {
       const c = await generateChallenge();
       setChallenge(c);
       setCode(c.starter_code ?? "");
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to generate challenge. Please try again.");
     } finally {
       setGenerating(false);
     }
@@ -151,12 +155,15 @@ export default function ChallengesPage() {
     if (!challenge || !code.trim()) return;
     setSubmitting(true);
     setResult(null);
+    setError(null);
     try {
       const r = await submitChallenge(challenge.id, code);
       setResult(r);
       // Refresh history
       const h = await getChallengeHistory().catch(() => []);
       setHistory(h ?? []);
+    } catch (e: any) {
+      setError(e?.message ?? "Submission failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -188,6 +195,12 @@ export default function ChallengesPage() {
           )}
         </button>
       </div>
+
+      {error && (
+        <div className="bg-red-900/30 border border-red-500/50 rounded-xl px-4 py-3 text-red-400 text-sm flex items-center gap-2">
+          <span>⚠️</span> {error}
+        </div>
+      )}
 
       {challenge && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

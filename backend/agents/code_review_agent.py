@@ -42,14 +42,16 @@ REVIEW_PROMPT = (
     "Review this {language} code:\n"
     "```{language}\n{code}\n```\n"
     "{context_block}"
-    "Return ONLY a JSON object with these exact fields:\n"
-    '- score: integer 1-10 (overall code quality)\n'
-    '- annotations: list of {{"line": int, "issue": str, "fix": str}} for specific line issues\n'
-    '- complexity: {{"time": str, "space": str}} with Big-O notation\n'
-    '- edge_cases: list of strings (unhandled edge cases found)\n'
-    '- improvements: list of {{"title": str, "description": str, "code_example": str}} (at least 2)\n'
-    '- best_practices: list of violated best practices\n'
-    '- summary: one paragraph overall assessment'
+    "Return ONLY a JSON object with these exact fields (do not wrap in markdown lists):\n"
+    "{{\n"
+    '  "score": 8,\n'
+    '  "annotations": [ {{"line": 42, "issue": "missing type hint", "fix": "add -> int"}} ],\n'
+    '  "complexity": {{"time": "O(N)", "space": "O(1)"}},\n'
+    '  "edge_cases": [ "empty list input" ],\n'
+    '  "improvements": [ {{"title": "Use list comprehension", "description": "Faster", "code_example": "x = [1]"}} ],\n'
+    '  "best_practices": [ "PEP8 violation" ],\n'
+    '  "summary": "overall assessment"\n'
+    "}}"
 )
 
 REFLECTION_SYSTEM = "You are a code review quality auditor."

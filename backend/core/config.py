@@ -16,9 +16,10 @@ class Settings(BaseSettings):
     # ── Cache / Queue ─────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # ── xAI / Grok ────────────────────────────────────────────────────────────
+    # ── Groq LLM (key is GROQ API key despite legacy env name) ───────────────
     XAI_API_KEY: str
-    GROK_MODEL: str = "grok-4.3"
+    GROK_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
 
     # ── GitHub OAuth ──────────────────────────────────────────────────────────
     GITHUB_CLIENT_ID: str

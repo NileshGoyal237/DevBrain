@@ -107,6 +107,14 @@ export async function apiRequest<T>(
     } catch {
       // ignore parse error
     }
+
+    // Auto-logout on expired / invalid token
+    if (response.status === 401) {
+      clearToken();
+      if (typeof window !== "undefined") window.location.href = "/";
+      throw new ApiError(401, "Session expired. Please log in again.");
+    }
+
     throw new ApiError(response.status, detail);
   }
 
@@ -162,8 +170,10 @@ function transformSkillProfile(p: any): any {
     skills: skillsPercent,
     top_languages: topLangs,
     total_repos: p.repo_count ?? 0,
+    summary: p.summary ?? "",
+    last_analyzed_at: p.analyzed_at,
     created_at: p.analyzed_at,
-    updated_at: p.analyzed_at
+    updated_at: p.analyzed_at,
   };
 }
 
@@ -406,6 +416,7 @@ export async function startInterview(
   if (!res) return null;
   return {
     ...res,
+    id: res.session_id,
     opening_message: res.first_question
   };
 }

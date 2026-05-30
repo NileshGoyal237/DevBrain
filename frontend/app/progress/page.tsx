@@ -232,7 +232,7 @@ export default function ProgressPage() {
               <span className="w-2 h-2 rounded-full bg-[#6366f1]" />
               Skill Radar (7d Deltas)
             </h2>
-            <SkillRadarChart skills={skills} skill_delta_7d={deltas} />
+            <SkillRadarChart skills={skills} delta={deltas} />
           </div>
 
           <div className="bg-[#1a1d2e] border border-[#2d3148] rounded-xl p-6 shadow-[0_0_15px_rgba(99,102,241,0.1)]">

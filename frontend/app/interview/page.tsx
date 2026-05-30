@@ -109,6 +109,7 @@ export default function InterviewPage() {
   const [starting, setStarting] = useState(false);
   const [report, setReport] = useState<ReportCard | null>(null);
   const [sessionComplete, setSessionComplete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!localStorage.getItem("devbrain_token")) router.push("/");
@@ -119,13 +120,15 @@ export default function InterviewPage() {
     setMessages([]);
     setReport(null);
     setSessionComplete(false);
+    setError(null);
     try {
       const s = await startInterview(mode);
       setSession(s);
-      // First message from AI
       if (s.opening_message) {
         setMessages([{ role: "assistant", content: s.opening_message }]);
       }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to start interview. Please try again.");
     } finally {
       setStarting(false);
     }
@@ -136,6 +139,7 @@ export default function InterviewPage() {
     const userMsg: Message = { role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
+    setError(null);
     try {
       const res = await sendInterviewMessage(session.id, text);
       const aiMsg: Message = {
@@ -147,6 +151,9 @@ export default function InterviewPage() {
         setSessionComplete(true);
         setReport(res.report ?? null);
       }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to send message. Please try again.");
+      setMessages((prev) => prev.slice(0, -1)); // remove the optimistic user message
     } finally {
       setIsLoading(false);
     }
@@ -169,6 +176,12 @@ export default function InterviewPage() {
           Adaptive AI interviewer — practice DSA or system design
         </p>
       </div>
+
+      {error && (
+        <div className="bg-red-900/30 border border-red-500/50 rounded-xl px-4 py-3 text-red-400 text-sm flex items-center gap-2">
+          <span>⚠️</span> {error}
+        </div>
+      )}
 
       {!session ? (
         /* ── Mode selector ── */

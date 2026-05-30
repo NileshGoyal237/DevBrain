@@ -105,7 +105,14 @@ async def generate_roadmap(
     skill_profile: dict = {}
     cached = await cache.get_skill_profile(user_id)
     if cached:
-        skill_profile = {"skills": cached.get("skills", {})}
+        skill_profile = {
+            "skills": cached.get("skills", {}),
+            "frameworks": cached.get("frameworks", {}),
+            "analysis_report": cached.get("analysis_report", {}),
+            "engineering_practices": cached.get("engineering_practices", {}),
+            "repo_highlights": cached.get("repo_highlights", []),
+            "summary": cached.get("summary", ""),
+        }
 
     state = {
         "user_id": user_id,

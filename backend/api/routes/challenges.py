@@ -98,6 +98,26 @@ async def generate_challenge(
     """
     user_id = str(current_user.id)
 
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    result = await db.execute(
+        select(Challenge).where(
+            Challenge.user_id == current_user.id,
+            Challenge.created_at >= today_start
+        ).order_by(Challenge.created_at.desc())
+    )
+    existing_challenge = result.scalars().first()
+    if existing_challenge:
+        return ChallengeResponse(
+            id=str(existing_challenge.id),
+            title=existing_challenge.title,
+            description=existing_challenge.description,
+            difficulty=existing_challenge.difficulty,
+            topic=existing_challenge.topic,
+            constraints=existing_challenge.constraints or [],
+            examples=existing_challenge.examples or [],
+            starter_code=existing_challenge.starter_code,
+        )
+
     skill_profile: dict = {}
     cached = await cache.get_skill_profile(user_id)
     if cached:
@@ -211,8 +231,6 @@ async def submit_challenge(
         tests_passed=eval_result["tests_passed"],
         tests_total=eval_result["tests_total"],
         passed=eval_result["passed"],
-        output=eval_result["output"],
-        error=eval_result.get("error"),
         submitted_at=datetime.utcnow(),
     )
     db.add(attempt)

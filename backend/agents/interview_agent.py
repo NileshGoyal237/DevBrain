@@ -132,11 +132,13 @@ async def _generate_opening_question(
         topic, difficulty = _pick_dsa_topic(skill_profile)
         prompt = (
             f"Generate a {difficulty} difficulty DSA coding interview question on the topic: {topic}.\n"
-            "Format your response as JSON with fields:\n"
-            '  "question": full problem statement with examples and constraints,\n'
-            '  "topic": the DSA topic,\n'
+            "Format your response as ONLY a JSON object with these exact fields (do not wrap in markdown):\n"
+            "{{\n"
+            '  "question": "full problem statement with examples and constraints",\n'
+            '  "topic": "the DSA topic",\n'
             '  "difficulty": "easy" | "medium" | "hard",\n'
-            '  "hints": list of 2 subtle hints (do not reveal the solution)'
+            '  "hints": ["subtle hint 1", "subtle hint 2"]\n'
+            "}}"
         )
         system = (
             "You are an experienced technical interviewer at a top tech company. "
@@ -148,11 +150,13 @@ async def _generate_opening_question(
         prompt = (
             f"Generate a system design interview question about: {topic}.\n"
             f"Calibrate for a {overall_difficulty}-level candidate.\n"
-            "Format your response as JSON with fields:\n"
-            '  "question": full problem statement with requirements and scope,\n'
-            '  "topic": the system design topic,\n'
+            "Format your response as ONLY a JSON object with these exact fields (do not wrap in markdown):\n"
+            "{{\n"
+            '  "question": "full problem statement with requirements and scope",\n'
+            '  "topic": "the system design topic",\n'
             '  "difficulty": "easy" | "medium" | "hard",\n'
-            '  "areas_to_cover": list of 4-5 subsystems/components the candidate should address'
+            '  "areas_to_cover": ["subsystem 1", "subsystem 2", "subsystem 3", "subsystem 4"]\n'
+            "}}"
         )
         system = (
             "You are a staff engineer conducting a system design interview. "
@@ -194,12 +198,14 @@ async def _evaluate_answer(
         f"ORIGINAL QUESTION:\n{json.dumps(original_question, indent=2)}\n\n"
         f"CONVERSATION HISTORY:\n{history_text}\n\n"
         f"CANDIDATE'S ANSWER:\n{user_answer}\n\n"
-        "Evaluate the answer and return ONLY a JSON object with:\n"
-        '  "score": integer 1-10,\n'
-        '  "feedback": str (constructive, 3-5 sentences — what was good, what was missing),\n'
-        '  "model_answer": str (ideal answer or solution outline),\n'
-        '  "next_difficulty": "easier" | "same" | "harder",\n'
-        '  "key_concepts_missed": list of str'
+        "Evaluate the answer and return ONLY a JSON object with these exact fields (do not wrap in markdown):\n"
+        "{{\n"
+        '  "score": 8,\n'
+        '  "feedback": "constructive feedback, 3-5 sentences — what was good, what was missing",\n'
+        '  "model_answer": "ideal answer or solution outline",\n'
+        '  "next_difficulty": "harder",\n'
+        '  "key_concepts_missed": ["missed concept 1", "missed concept 2"]\n'
+        "}}"
     )
     system = (
         "You are a senior technical interviewer providing fair, educational feedback. "
@@ -245,7 +251,13 @@ async def _generate_next_question(
         prompt = (
             f"Generate a {new_difficulty} DSA interview question on the topic: {topic}.\n"
             f"Previously covered topics (avoid repeating): {', '.join(used_topics)}.\n"
-            "Return ONLY JSON with fields: question, topic, difficulty, hints (list of 2)."
+            "Return ONLY a JSON object with these exact fields (do not wrap in markdown):\n"
+            "{{\n"
+            '  "question": "str",\n'
+            '  "topic": "str",\n'
+            '  "difficulty": "str",\n'
+            '  "hints": ["str", "str"]\n'
+            "}}"
         )
         system = (
             "You are a technical interviewer. Generate a fresh coding question. "
@@ -257,7 +269,13 @@ async def _generate_next_question(
         prompt = (
             f"Generate a {new_difficulty} system design question about: {topic}.\n"
             f"Previously covered topics (avoid repeating): {', '.join(used_topics)}.\n"
-            "Return ONLY JSON with fields: question, topic, difficulty, areas_to_cover (list of 4-5)."
+            "Return ONLY a JSON object with these exact fields (do not wrap in markdown):\n"
+            "{{\n"
+            '  "question": "str",\n'
+            '  "topic": "str",\n'
+            '  "difficulty": "str",\n'
+            '  "areas_to_cover": ["str", "str", "str", "str"]\n'
+            "}}"
         )
         system = (
             "You are a staff engineer interviewer. Generate a new system design question. "
@@ -286,13 +304,15 @@ async def _generate_session_report(history: list[dict[str, str]], mode: str) -> 
     prompt = (
         f"This was a {mode} interview session. Here is the full transcript:\n\n"
         f"{history_text}\n\n"
-        "Generate a comprehensive final report as ONLY a JSON object with:\n"
-        '  "overall_score": float (1.0-10.0),\n'
-        '  "strengths": list of str (3-5 items),\n'
-        '  "weak_areas": list of str (3-5 items),\n'
-        '  "recommended_topics": list of str (topics to study),\n'
-        '  "summary": str (2-3 sentence overall assessment),\n'
-        '  "interview_readiness": "not ready" | "almost ready" | "ready" | "strong candidate"'
+        "Generate a comprehensive final report as ONLY a JSON object with these exact fields (do not wrap in markdown):\n"
+        "{{\n"
+        '  "overall_score": 8.5,\n'
+        '  "strengths": ["str", "str", "str"],\n'
+        '  "weak_areas": ["str", "str", "str"],\n'
+        '  "recommended_topics": ["str", "str"],\n'
+        '  "summary": "str (2-3 sentence overall assessment)",\n'
+        '  "interview_readiness": "ready"\n'
+        "}}"
     )
     system = (
         "You are a senior hiring manager summarising a candidate's performance. "

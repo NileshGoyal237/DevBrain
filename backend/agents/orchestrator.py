@@ -81,11 +81,16 @@ def route_intent(state: DevBrainState) -> str:
 
 def orchestrator_node(state: DevBrainState) -> DevBrainState:
     """
-    Entry-point node.  Determines intent, sets current_agent, then the
-    conditional edge routes to the appropriate agent node.
+    Entry-point node. Determines intent (if not already set), sets current_agent, 
+    then the conditional edge routes to the appropriate agent node.
     """
-    intent = route_intent(state)
-    logger.info("Orchestrator resolved intent=%s for user=%s", intent, state.get("user_id"))
+    intent = state.get("intent")
+    if not intent:
+        intent = route_intent(state)
+        logger.info("Orchestrator resolved intent=%s for user=%s", intent, state.get("user_id"))
+    else:
+        logger.info("Orchestrator using pre-set intent=%s for user=%s", intent, state.get("user_id"))
+
     return {
         **state,
         "intent": intent,

@@ -218,15 +218,44 @@ SIX_WEEK_PLAN = {
 class TestRoadmapAgent:
 
     @pytest.mark.asyncio
-    @patch("agents.roadmap_agent.llm")
-    async def test_roadmap_agent_returns_6_weeks(self, mock_llm):
-        mock_llm.structured_call = AsyncMock(return_value=SIX_WEEK_PLAN)
+    @patch("agents.roadmap_agent.polish_roadmap_copy", new_callable=AsyncMock)
+    @patch("agents.roadmap_agent.async_session")
+    async def test_roadmap_agent_returns_6_weeks(self, mock_session, mock_polish):
+        from services.profile_engine import build_analysis_report
+
+        sample = {
+            "skills": {"Python": 0.7, "SQL": 0.4},
+            "frameworks": {"FastAPI": 0.8},
+            "engineering_practices": {
+                "has_cicd": False, "test_signal": 0.0,
+                "commit_quality": 0.2, "avg_complexity": 5.0,
+            },
+            "repo_highlights": [{
+                "name": "my-api", "primary_language": "Python",
+                "stars": 1, "has_cicd": False, "has_tests": False,
+                "frameworks": ["FastAPI"], "sample_commits": [],
+            }],
+            "sample_commits": [],
+            "repo_count": 1,
+        }
+        report = build_analysis_report(sample, "testdev")
+        mock_polish.side_effect = lambda plan, *_: plan
+
+        mock_sess = MagicMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_sess.execute = AsyncMock()
+        mock_sess.add = MagicMock()
+        mock_sess.commit = AsyncMock()
+        mock_sess.refresh = AsyncMock()
+
         state = _make_state(
-            skill_profile={"Python": 0.7, "SQL": 0.4},
-            user_input="I want to become a backend engineer",
+            skill_profile={"analysis_report": report},
+            structured_output={"target_role": "Backend Engineer"},
         )
         result = await roadmap_agent_node(state)
         assert len(result["structured_output"]["weeks"]) == 6
+        assert result["structured_output"]["generated_by"] == "roadmap_engine"
 
 
 # ===========================================================================

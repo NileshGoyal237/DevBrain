@@ -85,6 +85,7 @@ export default function DashboardPage() {
   const [githubToken, setGithubToken] = useState("");
   const [targetRole, setTargetRole] = useState(TARGET_ROLES[2]);
   const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
+  const [showReanalyze, setShowReanalyze] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -114,6 +115,7 @@ export default function DashboardPage() {
         useToken ? { github_token: token } : undefined,
       );
       setProfile(p);
+      setShowReanalyze(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Analysis failed");
     } finally {
@@ -156,6 +158,14 @@ export default function DashboardPage() {
   const skillLevel =
     avgSkill >= 75 ? "advanced" : avgSkill >= 45 ? "intermediate" : "beginner";
 
+  const lastAnalyzed = profile?.last_analyzed_at ?? profile?.updated_at;
+  const lastAnalyzedLabel = lastAnalyzed
+    ? new Date(lastAnalyzed).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : null;
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
       {/* Header */}
@@ -169,7 +179,19 @@ export default function DashboardPage() {
           </p>
         </div>
         {profile && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            {lastAnalyzedLabel && (
+              <span className="text-gray-500 text-xs">
+                Last analyzed {lastAnalyzedLabel}
+              </span>
+            )}
+            <button
+              onClick={() => setShowReanalyze((v) => !v)}
+              disabled={analyzing}
+              className="px-4 py-2 bg-[#1a1d2e] border border-[#2d3148] hover:border-[#6366f1] text-gray-300 hover:text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+            >
+              {analyzing ? "Analyzing…" : showReanalyze ? "Cancel" : "Re-analyze GitHub"}
+            </button>
             <label className="text-gray-400 text-sm">Target Role:</label>
             <select
               value={targetRole}
@@ -192,6 +214,37 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {profile && showReanalyze && (
+        <div className="bg-[#1a1d2e] border border-[#6366f1]/40 rounded-xl p-6 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+          <h2 className="text-white font-semibold mb-1">Re-analyze GitHub</h2>
+          <p className="text-gray-400 text-sm mb-4">
+            Refresh your skill profile from your latest repos. Add a token for
+            deeper signals (manifests, commits, CI/CD).
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="password"
+              placeholder="ghp_… (optional, recommended)"
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
+              className="flex-1 bg-[#0f1117] border border-[#2d3148] text-white text-sm rounded-lg px-4 py-2.5 focus:outline-none focus:border-[#6366f1] placeholder-gray-600"
+            />
+            <button
+              onClick={handleAnalyze}
+              disabled={analyzing}
+              className="px-6 py-2.5 bg-[#6366f1] hover:bg-[#5558e3] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              {analyzing ? "Analyzing repositories…" : "Run analysis →"}
+            </button>
+          </div>
+          {error && (
+            <p className="text-[#ef4444] text-sm bg-[#ef444411] rounded-lg px-4 py-2.5 mt-3">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
 
       {!profile ? (
         /* ── Onboarding card ── */
@@ -245,7 +298,8 @@ export default function DashboardPage() {
           </div>
         </div>
       ) : (
-        /* ── Main dashboard layout ── */
+        <>
+        {/* ── Main dashboard layout ── */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left: Radar Chart */}
           <div className="lg:col-span-2 bg-[#1a1d2e] border border-[#2d3148] rounded-xl p-6 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
@@ -255,7 +309,7 @@ export default function DashboardPage() {
             </h2>
             <SkillRadarChart
               skills={skills}
-              skill_delta_7d={dashboard?.skill_delta_7d}
+              delta={dashboard?.skill_delta_7d}
             />
             <div className="mt-4 flex items-center justify-between text-sm">
               <span className="text-gray-400">Overall Level</span>
@@ -355,6 +409,19 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {profile.summary && (
+          <div className="bg-[#1a1d2e] border border-[#2d3148] rounded-xl p-6 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+            <h2 className="text-white font-semibold mb-4 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#6366f1] inline-block" />
+              GitHub Analysis
+            </h2>
+            <div className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">
+              {profile.summary}
+            </div>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

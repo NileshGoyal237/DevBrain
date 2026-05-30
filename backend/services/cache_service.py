@@ -70,6 +70,18 @@ class CacheService:
     async def set_skill_profile(self, user_id: str, profile: dict) -> None:
         await self.set(f"skill:{user_id}", profile, ttl=86400)  # 24 h
 
+    async def delete_skill_profile(self, user_id: str) -> None:
+        await self.delete(f"skill:{user_id}")
+
+    async def get_progress_dashboard(self, user_id: str) -> dict | None:
+        return await self.get(f"progress_dashboard:{user_id}")
+
+    async def set_progress_dashboard(self, user_id: str, data: dict) -> None:
+        await self.set(f"progress_dashboard:{user_id}", data, ttl=300)  # 5 min
+
+    async def delete_progress_dashboard(self, user_id: str) -> None:
+        await self.delete(f"progress_dashboard:{user_id}")
+
     # ------------------------------------------------------------------
     # Roadmap helpers
     # ------------------------------------------------------------------

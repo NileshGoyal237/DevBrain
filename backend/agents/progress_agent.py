@@ -18,7 +18,6 @@ from sqlalchemy import select
 from models.database import async_session
 from models.progress import ProgressSnapshot
 from services.cache_service import cache
-from services.llm_service import llm
 
 logger = logging.getLogger(__name__)
 
@@ -114,14 +113,13 @@ async def progress_agent_node(state: dict) -> dict:
         }
         await _upsert_snapshot(user_id=user_id, now=now, data=today_snapshot_data)
 
-        # ── 5. Weekly digest via Grok ──────────────────────────────────────
-        digest_prompt = _build_digest_prompt(
+        # ── 5. Weekly digest (deterministic only — never competes with GitHub analyze)
+        weekly_digest: str = _deterministic_digest(
             skill_delta_7d=skill_delta_7d,
             pass_rate=pass_rate,
             streak=streak,
             exam_readiness=exam_readiness,
         )
-        weekly_digest: str = await llm.call(digest_prompt)
 
         # ── 6. Build output ────────────────────────────────────────────────
         structured: dict = {
@@ -246,10 +244,36 @@ async def _upsert_snapshot(user_id: str, now: datetime, data: dict) -> None:
                     skills=data["skills"],
                     challenges_done=data["challenges_done"],
                     challenges_passed=data["challenges_passed"],
-                    created_at=now,
                 )
             )
         await session.commit()
+
+
+def _deterministic_digest(
+    skill_delta_7d: dict[str, float],
+    pass_rate: float,
+    streak: int,
+    exam_readiness: dict[str, int],
+) -> str:
+    """Fast, non-LLM digest so dashboard loads never compete with GitHub analysis."""
+    improving = [k for k, v in skill_delta_7d.items() if v > 0.01]
+    declining = [k for k, v in skill_delta_7d.items() if v < -0.01]
+    top_ready = sorted(exam_readiness.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_ready_str = ", ".join(f"{k} ({v}%)" for k, v in top_ready) or "run GitHub analysis first"
+
+    return (
+        f"#### Progress & Wins\n"
+        f"- Activity streak: **{streak}** day(s)\n"
+        f"- Challenge pass rate: **{pass_rate * 100:.0f}%**\n"
+        f"- Improving skills: {', '.join(improving) or 'none yet — complete challenges to track growth'}\n\n"
+        f"#### Areas for Improvement\n"
+        f"- Needs attention: {', '.join(declining) or 'no declining skills detected'}\n"
+        f"- Exam readiness leaders: {top_ready_str}\n\n"
+        f"#### Action Plan\n"
+        f"- Complete 2–3 coding challenges this week to build your streak.\n"
+        f"- Focus practice on your lowest exam-readiness topic.\n"
+        f"- Re-analyze GitHub after shipping new repos to refresh your roadmap."
+    )
 
 
 def _build_digest_prompt(
@@ -272,9 +296,12 @@ def _build_digest_prompt(
         f"  - Improving skills         : {', '.join(improving) or 'none'}\n"
         f"  - Declining/stagnant skills: {', '.join(declining) or 'none'}\n"
         f"  - Top exam-ready topics    : {top_ready_str}\n\n"
-        f"Write exactly 3 sentences:\n"
-        f"1. Celebrate progress (be specific about what improved).\n"
-        f"2. Highlight the most important area that still needs work.\n"
-        f"3. Give one concrete action for the coming week.\n"
-        f"Be warm, motivational, and concise."
+        f"Write a comprehensive markdown-formatted weekly progress digest. You MUST include these three exact headers:\n"
+        f"#### Progress & Wins\n"
+        f"Celebrate their progress, highlighting specific improving skills and their current streak/pass rate.\n\n"
+        f"#### Areas for Improvement\n"
+        f"Highlight the most important areas that still need work based on declining or stagnant skills.\n\n"
+        f"#### Action Plan\n"
+        f"Give concrete actions for the coming week to maintain momentum and tackle weak areas.\n\n"
+        f"Be warm, motivational, and highly specific to the provided stats."
     )

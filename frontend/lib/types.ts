@@ -28,9 +28,13 @@ export interface User {
 export interface SkillProfile {
   id: string;
   user_id: string;
-  skills: Record<string, number>; // e.g. { "Python": 0.82, "TypeScript": 0.45 }
-  skill_delta_7d: Record<string, number>; // weekly change per skill
-  repositories_analyzed: number;
+  skills: Record<string, number>; // e.g. { "Python": 82, "TypeScript": 45 } (0–100)
+  skill_delta_7d?: Record<string, number>;
+  top_languages?: string[];
+  total_repos?: number;
+  summary?: string;
+  last_analyzed_at?: string;
+  repositories_analyzed?: number;
   total_commits: number;
   primary_languages: string[];
   frameworks_detected: string[];

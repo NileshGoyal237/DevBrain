@@ -205,8 +205,8 @@ async def evaluate_submission(
     first_error: Optional[str] = None
 
     for idx, tc in enumerate(actual_test_cases, start=1):
-        tc_input: str = tc.get("input", "")
-        expected: str = tc.get("expected", "").strip()
+        tc_input: str = str(tc.get("input", ""))
+        expected: str = str(tc.get("expected", "")).strip()
 
         # Build a self-contained script: user code + a minimal test harness
         harness = textwrap.dedent(f"""
@@ -216,25 +216,27 @@ async def evaluate_submission(
             _captured = io.StringIO()
             sys.stdout = _captured
             try:
-                # Support solutions named 'solution' or functions defined in user_code
-                # We execute tc_input directly if it's a full expression, or pass it to solution()
-                try:
-                    # try calling solution() first if defined
-                    if 'def solution' in {actual_code!r} or 'solution' in globals() or 'solution' in locals():
-                        _result = solution({tc_input!r})
-                    else:
-                        # Fallback: exec user_code and evaluate the input expression directly
-                        _result = eval({tc_input!r})
-                except NameError:
-                    # fallback to direct eval
-                    _result = eval({tc_input!r})
+                _tc_input_str = {tc_input!r}
+                if 'solution(' in _tc_input_str:
+                    _result = eval(_tc_input_str)
+                elif 'def solution' in {actual_code!r} or 'solution' in globals() or 'solution' in locals():
+                    try:
+                        _args = eval(_tc_input_str)
+                        if isinstance(_args, tuple):
+                            _result = solution(*_args)
+                        else:
+                            _result = solution(_args)
+                    except Exception:
+                        _result = solution(_tc_input_str)
+                else:
+                    _result = eval(_tc_input_str)
 
                 if _result is not None:
                     print(_result)
             except Exception as _exc:
                 sys.stdout = sys.__stdout__
                 print(f"ERROR: {{_exc}}")
-                raise
+                sys.exit(1)
             sys.stdout = sys.__stdout__
             _actual = _captured.getvalue().strip()
             print(_actual)
@@ -282,7 +284,7 @@ async def evaluate_submission(
             all_output_lines.append(f"Test {idx}: ❌ ERROR — {exc}")
             first_error = first_error or str(exc)
 
-    total = len(test_cases)
+    total = len(actual_test_cases)
     return {
         "tests_passed": tests_passed,
         "tests_total": total,
